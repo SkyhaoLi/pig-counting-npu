@@ -1,0 +1,43 @@
+# Large files
+output/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Model weights
+weights/
+*.onnx
+*.om
+*.ckpt
+*.pt
+
+# Dataset
+dataset/
+test_videos/
+
+# Embedded repos
+Jin的U盘资料/YOLO_MindSpore/mindyolo/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+/dev/shm/
