@@ -13,6 +13,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -26,6 +27,7 @@ import numpy as np
 from npu_detector import NPUDetector
 from trackers.byte_tracker.byte_tracker import BYTETracker
 from types import SimpleNamespace
+from track_and_count_npu import ZoneAnalyzer
 
 # ── Globals ──────────────────────────────────────────────────
 app_state = {
@@ -42,81 +44,71 @@ app_state = {
     'source': '',
     'resolution': '',
     'history': [],       # [{time, total}]
+    'result_root': '',
+    'current_result_dir': '',
+    'completed_result_dir': '',
     'lock': threading.Lock(),
     'reset_flag': False,
 }
 
 
 # ── Zone Analyzer (simplified for real-time) ─────────────────
-class RealtimeZoneAnalyzer:
-    def __init__(self, width, fps, out_ratio=0.45, wait_ratio=0.25):
-        self.width = width
-        self.fps = fps
-        self.split_0 = width * (out_ratio / 2)
-        self.split_1 = width * out_ratio
-        self.split_2 = width * (out_ratio + wait_ratio)
-        self.line_counters = {'line0': 0, 'line1': 0, 'line2': 0}
-        self.prev_positions = {}
-        self.zone_histories = {}  # track_id -> [zones]
-        self.first_frames = {}
-        self.last_frames = {}
+RESULT_FILES = {
+    'summary.csv': 'ByteTrack_summary.csv',
+    'id_events.csv': 'ByteTrack_id_events.csv',
+    'trajectory.csv': 'ByteTrack_trajectory_report.csv',
+    'state_changes.txt': 'ByteTrack_state_changes.txt',
+}
 
-    def get_zone(self, cx):
-        if cx < self.split_1:
-            return 'OUT'
-        elif cx < self.split_2:
-            return 'WAIT'
-        return 'ENTRY'
 
-    def update(self, track_id, cx, frame_idx):
-        zone = self.get_zone(cx)
-        if track_id in self.prev_positions:
-            prev_cx = self.prev_positions[track_id]
-            if prev_cx > self.split_0 >= cx:
-                self.line_counters['line0'] += 1
-            elif prev_cx < self.split_0 <= cx:
-                self.line_counters['line0'] -= 1
-            if prev_cx > self.split_1 >= cx:
-                self.line_counters['line1'] += 1
-            elif prev_cx < self.split_1 <= cx:
-                self.line_counters['line1'] -= 1
-            if prev_cx > self.split_2 >= cx:
-                self.line_counters['line2'] += 1
-            elif prev_cx < self.split_2 <= cx:
-                self.line_counters['line2'] -= 1
-        self.prev_positions[track_id] = cx
+def count_valid_trajectories(analyzer):
+    valid = 0
+    for traj in analyzer.trajectories.values():
+        is_valid, _ = traj.analyze()
+        if is_valid:
+            valid += 1
+    return valid
 
-        if track_id not in self.zone_histories:
-            self.zone_histories[track_id] = [zone]
-            self.first_frames[track_id] = frame_idx
-        else:
-            if self.zone_histories[track_id][-1] != zone:
-                self.zone_histories[track_id].append(zone)
-        self.last_frames[track_id] = frame_idx
 
-    def get_total(self):
-        l0 = self.line_counters['line0']
-        l1 = self.line_counters['line1']
-        l2 = self.line_counters['line2']
-        return round((l0 + l1 + l2) / 3.0)
+def get_total_count(analyzer):
+    line0 = analyzer.line_counters['line0']
+    line1 = analyzer.line_counters['line1']
+    line2 = analyzer.line_counters['line2']
+    return round((line0 + line1 + line2) / 3.0)
 
-    def get_valid_count(self):
-        count = 0
-        for tid, history in self.zone_histories.items():
-            if not history or history[0] != 'ENTRY':
-                continue
-            if 'OUT' not in history:
-                continue
-            try:
-                last_entry_idx = len(history) - 1 - history[::-1].index('ENTRY')
-                final = history[last_entry_idx:]
-                if 'WAIT' in final:
-                    first_wait = final.index('WAIT')
-                    if 'OUT' in final[first_wait:]:
-                        count += 1
-            except ValueError:
-                pass
-        return count
+
+def export_result_files(analyzer, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    analyzer.valid_count = 0
+    analyzer.finalize(output_dir, "ByteTrack")
+
+
+def snapshot_completed_results(current_dir, completed_dir):
+    completed_dir.mkdir(parents=True, exist_ok=True)
+    for filename in RESULT_FILES.values():
+        src = current_dir / filename
+        if src.exists():
+            shutil.copy2(src, completed_dir / filename)
+
+
+def resolve_download_path(request_path):
+    key = request_path.rsplit('/', 1)[-1]
+    filename = RESULT_FILES.get(key)
+    if request_path == '/download/csv':
+        filename = RESULT_FILES['summary.csv']
+    if not filename:
+        return None
+
+    with app_state['lock']:
+        completed_dir = Path(app_state['completed_result_dir']) if app_state['completed_result_dir'] else None
+        current_dir = Path(app_state['current_result_dir']) if app_state['current_result_dir'] else None
+
+    for base in (completed_dir, current_dir):
+        if base:
+            candidate = base / filename
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def is_blue_object(frame, bbox, blue_threshold=1.3):
@@ -151,7 +143,7 @@ def grabber_loop(cap):
 
 
 # ── Inference thread ─────────────────────────────────────────
-def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio):
+def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
     global app_state
 
     detector = NPUDetector(om_path, conf_thres=conf_thres)
@@ -179,7 +171,12 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         app_state['start_time'] = time.time()
         app_state['running'] = True
 
-    analyzer = RealtimeZoneAnalyzer(width, fps, out_ratio, wait_ratio)
+    analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
+    output_root = Path(output_root)
+    current_result_dir = output_root / "current"
+    completed_result_dir = output_root / "latest_completed"
+    current_result_dir.mkdir(parents=True, exist_ok=True)
+    completed_result_dir.mkdir(parents=True, exist_ok=True)
 
     byte_args = SimpleNamespace(track_thresh=track_thresh, track_buffer=30, match_thresh=0.8, mot20=False)
     tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
@@ -192,11 +189,19 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
     frame_idx = 0
     t_last = time.time()
     fps_counter = 0
+    last_export = 0.0
+
+    with app_state['lock']:
+        app_state['result_root'] = str(output_root)
+        app_state['current_result_dir'] = str(current_result_dir)
+        app_state['completed_result_dir'] = str(completed_result_dir)
 
     while app_state['running']:
         # Check reset
         if app_state['reset_flag']:
-            analyzer = RealtimeZoneAnalyzer(width, fps, out_ratio, wait_ratio)
+            export_result_files(analyzer, current_result_dir)
+            snapshot_completed_results(current_result_dir, completed_result_dir)
+            analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
             tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
             frame_idx = 0
             with app_state['lock']:
@@ -218,9 +223,11 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         else:
             ret, frame = cap.read()
             if not ret:
+                export_result_files(analyzer, current_result_dir)
+                snapshot_completed_results(current_result_dir, completed_result_dir)
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 frame_idx = 0
-                analyzer = RealtimeZoneAnalyzer(width, fps, out_ratio, wait_ratio)
+                analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
                 tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
                 continue
 
@@ -237,7 +244,10 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
 
         for tid, bbox in active_tracks:
             cx = (bbox[0] + bbox[2]) / 2
-            analyzer.update(tid, cx, frame_idx)
+            cy = (bbox[1] + bbox[3]) / 2
+            bw = bbox[2] - bbox[0]
+            bh = bbox[3] - bbox[1]
+            analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None)
 
         # Draw
         annotated = frame.copy()
@@ -245,7 +255,7 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         cv2.line(annotated, (int(analyzer.split_1), 0), (int(analyzer.split_1), height), (0, 255, 255), 2)
         cv2.line(annotated, (int(analyzer.split_2), 0), (int(analyzer.split_2), height), (0, 255, 255), 2)
 
-        total = analyzer.get_total()
+        total = get_total_count(analyzer)
         cv2.rectangle(annotated, (width - 200, 0), (width, 60), (0, 0, 0), -1)
         cv2.putText(annotated, f"TOTAL: {total}", (width - 190, 40), 0, 1.0, (0, 255, 0), 2)
 
@@ -268,21 +278,29 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         else:
             infer_fps = app_state['fps_inference']
 
+        do_export = False
         with app_state['lock']:
             app_state['frame_jpeg'] = jpeg.tobytes()
             app_state['fps_inference'] = round(infer_fps, 1)
             app_state['frame_count'] = frame_idx
             app_state['line_counters'] = dict(analyzer.line_counters)
             app_state['total_count'] = total
-            app_state['valid_traj'] = analyzer.get_valid_count()
-            app_state['total_ids'] = len(analyzer.zone_histories)
+            app_state['valid_traj'] = count_valid_trajectories(analyzer)
+            app_state['total_ids'] = len(analyzer.trajectories)
             # History point every 5 seconds
             elapsed = time.time() - app_state['start_time']
             if len(app_state['history']) == 0 or elapsed - app_state['history'][-1]['time'] >= 5:
                 app_state['history'].append({'time': round(elapsed, 1), 'total': total})
+            if elapsed - last_export >= 5:
+                do_export = True
+                last_export = elapsed
+
+        if do_export:
+            export_result_files(analyzer, current_result_dir)
 
         frame_idx += 1
 
+    export_result_files(analyzer, current_result_dir)
     cap.release()
 
 
@@ -398,7 +416,10 @@ canvas { width: 100%; height: 120px; }
         <div class="card">
             <h3>Actions</h3>
             <div class="actions">
-                <a class="btn btn-primary" href="/download/csv" download>Download CSV</a>
+                <a class="btn btn-primary" href="/download/summary.csv" download>Summary CSV</a>
+                <a class="btn btn-primary" href="/download/id_events.csv" download>Events CSV</a>
+                <a class="btn btn-primary" href="/download/trajectory.csv" download>Trajectory CSV</a>
+                <a class="btn btn-primary" href="/download/state_changes.txt" download>State TXT</a>
                 <button class="btn btn-danger" onclick="resetCount()">Reset</button>
             </div>
         </div>
@@ -514,25 +535,20 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
 
-        elif self.path == '/download/csv':
-            with app_state['lock']:
-                lc = app_state['line_counters']
-                rows = [
-                    ['line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids'],
-                    [lc.get('line0', 0), lc.get('line1', 0), lc.get('line2', 0),
-                     app_state['total_count'], app_state['valid_traj'], app_state['total_ids']]
-                ]
-            import io
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerows(rows)
-            content = buf.getvalue().encode('utf-8')
+        elif self.path.startswith('/download/'):
+            file_path = resolve_download_path(self.path)
+            if not file_path:
+                self.send_response(404)
+                self.end_headers()
+                return
             self.send_response(200)
-            self.send_header('Content-Type', 'text/csv')
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.send_header('Content-Disposition', f'attachment; filename=pig_count_{ts}.csv')
+            content_type = 'text/plain'
+            if file_path.suffix == '.csv':
+                content_type = 'text/csv'
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Disposition', f'attachment; filename={file_path.name}')
             self.end_headers()
-            self.wfile.write(content)
+            self.wfile.write(file_path.read_bytes())
 
         else:
             self.send_response(404)
@@ -564,6 +580,7 @@ def main():
     parser.add_argument('--track_thresh', type=float, default=0.5)
     parser.add_argument('--out_ratio', type=float, default=0.45)
     parser.add_argument('--wait_ratio', type=float, default=0.25)
+    parser.add_argument('--output_dir', type=str, default='output/web_monitor')
     args = parser.parse_args()
 
     if args.camera_ip:
@@ -583,7 +600,7 @@ def main():
     # Start inference in background thread
     t = threading.Thread(target=inference_loop, args=(
         source, args.om, args.conf_thres, args.track_thresh,
-        args.out_ratio, args.wait_ratio), daemon=True)
+        args.out_ratio, args.wait_ratio, args.output_dir), daemon=True)
     t.start()
 
     # Wait for first frame

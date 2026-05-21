@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "videos": {
+    "17-37.mp4": {
+      "review_status": "human_reviewed",
+      "paper_actual": 31,
+      "paper_count": 32,
+      "note": "Six reverse-direction entrants at the start are excluded from the forward-flow total; one occlusion-induced re-ID adds one extra count.",
+      "tags": [
+        "ground_truth_corrected",
+        "reverse_direction_entry",
+        "id_switch"
+      ]
+    },
+    "长视频.mp4": {
+      "review_status": "human_reviewed",
+      "paper_actual": 2189,
+      "paper_count": 2190,
+      "note": "Long-video ground truth was manually confirmed as 2189.",
+      "tags": [
+        "ground_truth_confirmed",
+        "long_video"
+      ]
+    },
+    "1.mp4": {
+      "review_status": "human_reviewed",
+      "paper_actual": 2189,
+      "paper_count": 2187,
+      "note": "Group-6 video 1 ground truth was manually confirmed as 2189.",
+      "tags": [
+        "ground_truth_confirmed",
+        "group6"
+      ]
+    },
+    "2.mp4": {
+      "review_status": "human_reviewed",
+      "paper_actual": 569,
+      "paper_count": 568,
+      "note": "Group-6 video 2 ground truth was manually confirmed as 569.",
+      "tags": [
+        "ground_truth_confirmed",
+        "group6"
+      ]
+    },
+    "3.mp4": {
+      "review_status": "human_reviewed",
+      "paper_actual": 981,
+      "paper_count": 981,
+      "note": "Group-6 video 3 ground truth was manually confirmed as 981.",
+      "tags": [
+        "ground_truth_confirmed",
+        "group6"
+      ]
+    }
+  }
+}

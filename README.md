@@ -56,6 +56,7 @@ RTSP摄像头 → 抓帧 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 →
 - 系统：CANN 7.0.RC1, Python 3.10.6
 - 模型：`yolov8n_pig_fp16.om`（FP16 量化）
 - 依赖：`opencv-python`, `numpy`
+- 初始化脚本：`deploy_atlas/bootstrap_board.sh`
 
 ### 摄像头
 
@@ -75,17 +76,33 @@ python track_and_count.py \
 ### 部署到 Atlas 板子
 
 ```bash
-# 1. 自动上传文件到板子
+# 1. PC 端自动上传部署包、OM 模型，并执行板端自检
 python deploy_to_atlas.py
 
-# 2. SSH到板子，启动实时监控
+# 2. SSH 到板子；如果是全新板子，先手动再跑一遍初始化脚本确认环境
 ssh HwHiAiUser@192.168.137.100
 cd ~/pig_counting
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-python3 web_monitor.py --om models/yolov8n_pig_fp16.om
+./bootstrap_board.sh
 
-# 3. 浏览器打开
+# 3. 启动网页监控
+python3 web_monitor.py \
+  --video datasets/group4/1-12头.mp4 \
+  --om models/yolov8n_pig_fp16.om
+
+# 4. 浏览器打开
 # http://192.168.137.100:8080
+```
+
+如果只想上传代码和模型，不上传任何本地视频：
+
+```bash
+python deploy_to_atlas.py --skip-datasets
+```
+
+如果只想部署，不立刻执行板端初始化脚本：
+
+```bash
+python deploy_to_atlas.py --skip-bootstrap
 ```
 
 ### NPU 批量测试
