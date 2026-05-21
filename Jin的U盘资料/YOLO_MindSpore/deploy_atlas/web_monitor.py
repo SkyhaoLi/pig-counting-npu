@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pig Counting Web Monitor - Atlas 200I DK A2
-Real-time RTSP/video stream + NPU inference + ByteTrack + Web UI
+Real-time RTSP/video stream + NPU inference + ByteTrack + Web UI + Agent
 
 Usage:
     python3 web_monitor.py --rtsp "rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
@@ -28,6 +28,7 @@ from npu_detector import NPUDetector
 from trackers.byte_tracker.byte_tracker import BYTETracker
 from types import SimpleNamespace
 from track_and_count_npu import ZoneAnalyzer
+from autonomous_agent import AutonomousOpsAgent
 
 # ── Globals ──────────────────────────────────────────────────
 app_state = {
@@ -43,16 +44,49 @@ app_state = {
     'start_time': None,
     'source': '',
     'resolution': '',
-    'history': [],       # [{time, total}]
+    'history': [],
     'result_root': '',
     'current_result_dir': '',
     'completed_result_dir': '',
     'lock': threading.Lock(),
     'reset_flag': False,
+    'agent': None,
+    'manual_reviews': [],
+}
+# ── Stream control (shared between grabber and inference) ──
+stream_ctl = {
+    'cap': None,
+    'source': '',
+    'reconnect_flag': False,
+    'reconnect_result': None,
+    'lock': threading.Lock(),
 }
 
+# ── Manual review store ──
+review_store = {"path": None}
 
-# ── Zone Analyzer (simplified for real-time) ─────────────────
+
+def append_manual_review(subject, decision, note=""):
+    entry = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "subject": subject,
+        "decision": decision,
+        "note": note,
+    }
+    path = review_store.get("path")
+    if path:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with app_state['lock']:
+        reviews = app_state["manual_reviews"]
+        reviews.append(entry)
+        if len(reviews) > 50:
+            app_state["manual_reviews"] = reviews[-50:]
+    return entry
+
+
+# ── Zone helpers ─────────────────────────────────────────────
 RESULT_FILES = {
     'summary.csv': 'ByteTrack_summary.csv',
     'id_events.csv': 'ByteTrack_id_events.csv',
@@ -98,11 +132,9 @@ def resolve_download_path(request_path):
         filename = RESULT_FILES['summary.csv']
     if not filename:
         return None
-
     with app_state['lock']:
         completed_dir = Path(app_state['completed_result_dir']) if app_state['completed_result_dir'] else None
         current_dir = Path(app_state['current_result_dir']) if app_state['current_result_dir'] else None
-
     for base in (completed_dir, current_dir):
         if base:
             candidate = base / filename
@@ -128,12 +160,40 @@ def is_blue_object(frame, bbox, blue_threshold=1.3):
     return b > rg * blue_threshold and b > 80
 
 
-# ── Frame grabber thread (drains RTSP buffer for low latency) ─
+# ── Frame grabber thread (with reconnect support) ────────────
 latest_frame = {'frame': None, 'lock': threading.Lock()}
+MAX_RECONNECT_ATTEMPTS = 5
 
-def grabber_loop(cap):
-    """Continuously grab frames so the buffer never stalls."""
+
+def grabber_loop():
+    """Continuously grab frames; handle reconnect requests."""
     while app_state.get('running', True):
+        with stream_ctl['lock']:
+            if stream_ctl['reconnect_flag']:
+                old_cap = stream_ctl['cap']
+                if old_cap:
+                    old_cap.release()
+                source = stream_ctl['source']
+                success = False
+                for attempt in range(MAX_RECONNECT_ATTEMPTS):
+                    new_cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+                    new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    if new_cap.isOpened():
+                        stream_ctl['cap'] = new_cap
+                        success = True
+                        break
+                    new_cap.release()
+                    time.sleep(1.0 * (attempt + 1))
+                stream_ctl['reconnect_flag'] = False
+                stream_ctl['reconnect_result'] = success
+                if not success:
+                    stream_ctl['cap'] = None
+                continue
+
+        cap = stream_ctl.get('cap')
+        if cap is None:
+            time.sleep(0.1)
+            continue
         ret, frame = cap.read()
         if not ret:
             time.sleep(0.01)
@@ -144,9 +204,9 @@ def grabber_loop(cap):
 
 # ── Inference thread ─────────────────────────────────────────
 def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
-    global app_state
-
     detector = NPUDetector(om_path, conf_thres=conf_thres)
+    agent = AutonomousOpsAgent(log_dir=output_root)
+    app_state['agent'] = agent
 
     if source.startswith('rtsp://') or source.startswith('http://'):
         cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
@@ -181,15 +241,21 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
     byte_args = SimpleNamespace(track_thresh=track_thresh, track_buffer=30, match_thresh=0.8, mot20=False)
     tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
 
-    # Start grabber thread for streams to drain buffer
     if is_stream:
-        gt = threading.Thread(target=grabber_loop, args=(cap,), daemon=True)
+        with stream_ctl['lock']:
+            stream_ctl['cap'] = cap
+            stream_ctl['source'] = source
+            stream_ctl['reconnect_result'] = None
+        agent.note_stream_started(source)
+        gt = threading.Thread(target=grabber_loop, daemon=True)
         gt.start()
 
     frame_idx = 0
     t_last = time.time()
     fps_counter = 0
     last_export = 0.0
+    failure_streak = 0
+    last_good_frame_time = time.time()
 
     with app_state['lock']:
         app_state['result_root'] = str(output_root)
@@ -211,15 +277,37 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             print("[RESET] Counters reset")
 
         if is_stream:
-            # Always take the latest frame (skip stale ones)
+            # Check if agent wants reconnect
+            actions = agent.consume_actions()
+            if actions.get("reconnect"):
+                with stream_ctl['lock']:
+                    stream_ctl['reconnect_flag'] = True
+                    stream_ctl['reconnect_result'] = None
+                for _ in range(80):
+                    time.sleep(0.1)
+                    with stream_ctl['lock']:
+                        result = stream_ctl.get('reconnect_result')
+                    if result is not None:
+                        break
+                success = result if result is not None else False
+                agent.note_reconnect_result(success)
+                if success:
+                    failure_streak = 0
+                    last_good_frame_time = time.time()
+                continue
+
             with latest_frame['lock']:
                 frame = latest_frame['frame']
             if frame is None:
+                failure_streak += 1
+                wait_seconds = time.time() - last_good_frame_time
+                agent.note_waiting_for_frame(wait_seconds, failure_streak)
                 time.sleep(0.01)
                 continue
-            # Clear so we don't reprocess same frame
             with latest_frame['lock']:
                 latest_frame['frame'] = None
+            failure_streak = 0
+            last_good_frame_time = time.time()
         else:
             ret, frame = cap.read()
             if not ret:
@@ -287,13 +375,16 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             app_state['total_count'] = total
             app_state['valid_traj'] = count_valid_trajectories(analyzer)
             app_state['total_ids'] = len(analyzer.trajectories)
-            # History point every 5 seconds
             elapsed = time.time() - app_state['start_time']
             if len(app_state['history']) == 0 or elapsed - app_state['history'][-1]['time'] >= 5:
                 app_state['history'].append({'time': round(elapsed, 1), 'total': total})
             if elapsed - last_export >= 5:
                 do_export = True
                 last_export = elapsed
+
+        # Agent: report frame metrics
+        agent.note_frame(frame_idx, infer_fps, total,
+                         app_state['valid_traj'], app_state['total_ids'])
 
         if do_export:
             export_result_files(analyzer, current_result_dir)
@@ -351,6 +442,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 .btn-danger { background: #ef4444; color: white; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 canvas { width: 100%; height: 120px; }
+.badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.badge-healthy { background: #166534; color: #22c55e; }
+.badge-boot { background: #1e293b; color: #94a3b8; }
+.badge-warn { background: #713f12; color: #facc15; }
+.badge-recovering { background: #713f12; color: #fb923c; }
+.badge-error { background: #7f1d1d; color: #ef4444; }
 @media (max-width: 900px) {
     .container { grid-template-columns: 1fr; }
 }
@@ -409,6 +506,36 @@ canvas { width: 100%; height: 120px; }
                 </div>
             </div>
         </div>
+        <div class="card" id="agent-card">
+            <h3>Agent Health</h3>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span id="agent-badge" class="badge badge-boot">BOOT</span>
+                <div style="flex:1;background:#0f172a;border-radius:4px;height:8px;">
+                    <div id="health-bar" style="width:100%;height:100%;background:#22c55e;border-radius:4px;transition:width 0.3s;"></div>
+                </div>
+                <span id="health-pct" style="font-size:0.8rem;">100%</span>
+            </div>
+            <div id="agent-events" style="max-height:120px;overflow-y:auto;font-size:0.75rem;color:#94a3b8;"></div>
+            <div style="margin-top:10px;">
+                <button class="btn btn-primary" onclick="showReviewForm()">Manual Review</button>
+            </div>
+            <div id="review-form" style="display:none;margin-top:10px;">
+                <select id="rev-subject" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
+                    <option value="stale_frame">Stale Frame</option>
+                    <option value="count_drift">Count Drift</option>
+                    <option value="low_fps">Low FPS</option>
+                    <option value="other">Other</option>
+                </select>
+                <select id="rev-decision" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
+                    <option value="confirmed">Confirmed</option>
+                    <option value="dismissed">Dismissed</option>
+                    <option value="escalated">Escalated</option>
+                </select>
+                <input id="rev-note" placeholder="Note (optional)" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
+                <button class="btn btn-primary" onclick="submitReview()">Submit</button>
+                <button class="btn" onclick="hideReviewForm()" style="color:#94a3b8;">Cancel</button>
+            </div>
+        </div>
         <div class="card">
             <h3>Trend</h3>
             <canvas id="chart"></canvas>
@@ -427,7 +554,7 @@ canvas { width: 100%; height: 120px; }
 </div>
 <script>
 function update() {
-    fetch('/api/stats').then(r => r.json()).then(d => {
+    fetch('/api/stats').then(function(r){return r.json();}).then(function(d) {
         document.getElementById('total').textContent = d.total_count;
         document.getElementById('line0').textContent = d.line0;
         document.getElementById('line1').textContent = d.line1;
@@ -439,28 +566,46 @@ function update() {
         document.getElementById('info-src').textContent =
             d.resolution + ' | ' + d.fps_source + ' fps';
         drawChart(d.history);
-    }).catch(() => {});
+        updateAgent(d.agent);
+    }).catch(function(){});
+}
+function updateAgent(agent) {
+    if (!agent) return;
+    var badge = document.getElementById('agent-badge');
+    badge.textContent = agent.status;
+    badge.className = 'badge badge-' + agent.status.toLowerCase();
+    document.getElementById('health-bar').style.width = agent.health_score + '%';
+    document.getElementById('health-bar').style.background =
+        agent.health_score > 60 ? '#22c55e' : agent.health_score > 30 ? '#facc15' : '#ef4444';
+    document.getElementById('health-pct').textContent = agent.health_score + '%';
+    var el = document.getElementById('agent-events');
+    el.innerHTML = (agent.events || []).map(function(e) {
+        var c = e.severity==='error'?'#ef4444':e.severity==='warn'?'#facc15':'#94a3b8';
+        return '<div style="padding:2px 0;border-bottom:1px solid #1e293b;">' +
+            '<span style="color:#64748b;">' + e.ts + '</span> ' +
+            '<span style="color:' + c + ';">' + e.message + '</span></div>';
+    }).join('');
 }
 function drawChart(history) {
-    const c = document.getElementById('chart');
-    const ctx = c.getContext('2d');
+    var c = document.getElementById('chart');
+    var ctx = c.getContext('2d');
     c.width = c.offsetWidth * 2; c.height = c.offsetHeight * 2;
     ctx.scale(2, 2);
-    const W = c.offsetWidth, H = c.offsetHeight;
+    var W = c.offsetWidth, H = c.offsetHeight;
     ctx.clearRect(0, 0, W, H);
     if (!history || history.length < 2) return;
-    const maxT = Math.max(...history.map(h => h.total), 1);
+    var maxT = Math.max.apply(null, history.map(function(h){return h.total;})) || 1;
     ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    history.forEach((h, i) => {
-        const x = (i / (history.length - 1)) * W;
-        const y = H - (h.total / maxT) * (H - 10) - 5;
+    history.forEach(function(h, i) {
+        var x = (i / (history.length - 1)) * W;
+        var y = H - (h.total / maxT) * (H - 10) - 5;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
 }
 function resetCount() {
-    fetch('/api/reset', {method:'POST'}).then(r => r.json()).then(d => {
+    fetch('/api/reset', {method:'POST'}).then(function(r){return r.json();}).then(function(d) {
         if (d.ok) {
             document.getElementById('total').textContent = '0';
             document.getElementById('line0').textContent = '0';
@@ -474,20 +619,30 @@ function resetCount() {
         }
     });
 }
+function showReviewForm() { document.getElementById('review-form').style.display = 'block'; }
+function hideReviewForm() { document.getElementById('review-form').style.display = 'none'; }
+function submitReview() {
+    var body = JSON.stringify({
+        subject: document.getElementById('rev-subject').value,
+        decision: document.getElementById('rev-decision').value,
+        note: document.getElementById('rev-note').value
+    });
+    fetch('/api/review', {method:'POST', body:body, headers:{'Content-Type':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(function(d){ if(d.ok) { hideReviewForm(); document.getElementById('rev-note').value=''; } });
+}
 setInterval(update, 500);
 update();
 </script>
 </body>
 </html>'''
-
-
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass  # suppress logs
+        pass
 
     def do_GET(self):
         if self.path == '/':
@@ -511,7 +666,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.write(jpeg)
                         self.wfile.write(b'\r\n')
                         self.wfile.flush()
-                    time.sleep(0.08)  # ~12 fps max for web
+                    time.sleep(0.08)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
@@ -529,7 +684,13 @@ class Handler(BaseHTTPRequestHandler):
                     'total_ids': app_state['total_ids'],
                     'resolution': app_state['resolution'],
                     'history': app_state['history'][-60:],
+                    'manual_reviews': app_state.get('manual_reviews', [])[-10:],
                 }
+            agent = app_state.get('agent')
+            if agent:
+                data['agent'] = agent.snapshot()
+            else:
+                data['agent'] = None
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -562,6 +723,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
+
+        elif self.path == '/api/review':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+            try:
+                payload = json.loads(body)
+                subject = payload.get('subject', 'unknown')
+                decision = payload.get('decision', 'noted')
+                note = payload.get('note', '')
+                entry = append_manual_review(subject, decision, note)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "entry": entry}).encode())
+            except Exception as e:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -584,8 +765,6 @@ def main():
     args = parser.parse_args()
 
     if args.camera_ip:
-        # Don't URL-encode: OpenCV RTSP splits on the LAST @ in the authority
-        # Use subtype=1 (sub stream) for lower resolution, better for web streaming
         source = f"rtsp://{args.camera_user}:{args.camera_pass}@{args.camera_ip}:554/cam/realmonitor?channel=1&subtype=1"
     else:
         source = args.rtsp or args.video
@@ -593,24 +772,23 @@ def main():
         print("Error: specify --camera_ip, --rtsp, or --video")
         sys.exit(1)
 
+    review_store["path"] = Path(args.output_dir) / "manual_reviews.jsonl"
+
     print(f"Source: {source}")
     print(f"Model: {args.om}")
     print(f"Web UI: http://0.0.0.0:{args.port}")
 
-    # Start inference in background thread
     t = threading.Thread(target=inference_loop, args=(
         source, args.om, args.conf_thres, args.track_thresh,
         args.out_ratio, args.wait_ratio, args.output_dir), daemon=True)
     t.start()
 
-    # Wait for first frame
     print("Waiting for first frame...")
     for _ in range(100):
         if app_state['frame_jpeg'] is not None:
             break
         time.sleep(0.1)
 
-    # Start HTTP server (threaded so /stream doesn't block other requests)
     server = ThreadedHTTPServer(('0.0.0.0', args.port), Handler)
     print(f"\n>>> Open http://192.168.137.100:{args.port} in your browser <<<\n")
     try:

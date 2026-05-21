@@ -6,6 +6,8 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import types
+import tempfile
 from pathlib import Path
 import shutil
 
@@ -18,7 +20,60 @@ if str(DEPLOY_ATLAS) not in sys.path:
 from review_agent import HumanReviewAgent
 from diagnosis_agent import DiagnosisAgent
 from autonomous_agent import AutonomousOpsAgent
-import web_monitor
+
+
+def _import_web_monitor():
+    """Import web_monitor with mocked hardware dependencies."""
+    for mod_name in ['cv2', 'numpy', 'npu_detector',
+                     'trackers', 'trackers.byte_tracker',
+                     'trackers.byte_tracker.byte_tracker',
+                     'track_and_count_npu']:
+        if mod_name not in sys.modules:
+            sys.modules[mod_name] = types.ModuleType(mod_name)
+
+    np_mock = sys.modules['numpy']
+    np_mock.empty = lambda *a, **k: []
+    np_mock.array = lambda *a, **k: []
+    np_mock.mean = lambda *a, **k: 0
+    np_mock.random = types.ModuleType('numpy.random')
+    np_mock.random.seed = lambda x: None
+    np_mock.random.randint = lambda *a, **k: [100, 100, 100]
+    sys.modules['numpy.random'] = np_mock.random
+
+    cv2_mock = sys.modules['cv2']
+    cv2_mock.VideoCapture = lambda *a, **k: None
+    cv2_mock.CAP_FFMPEG = 0
+    cv2_mock.CAP_PROP_BUFFERSIZE = 0
+    cv2_mock.CAP_PROP_FRAME_WIDTH = 0
+    cv2_mock.CAP_PROP_FRAME_HEIGHT = 0
+    cv2_mock.CAP_PROP_FPS = 0
+    cv2_mock.CAP_PROP_POS_FRAMES = 0
+    cv2_mock.IMWRITE_JPEG_QUALITY = 0
+
+    npu_mod = sys.modules['npu_detector']
+    class FakeDetector:
+        def __init__(self, *a, **k): pass
+        def detect(self, *a): return []
+    npu_mod.NPUDetector = FakeDetector
+
+    tc_mod = sys.modules['track_and_count_npu']
+    class FakeZone:
+        def __init__(self, *a, **k):
+            self.split_0 = self.split_1 = self.split_2 = 0
+            self.line_counters = {'line0': 0, 'line1': 0, 'line2': 0}
+            self.trajectories = {}
+        def update(self, *a, **k): pass
+        def finalize(self, *a, **k): pass
+    tc_mod.ZoneAnalyzer = FakeZone
+
+    bt_mod = sys.modules['trackers.byte_tracker.byte_tracker']
+    class FakeBYTE:
+        def __init__(self, *a, **k): pass
+        def update(self, *a, **k): return []
+    bt_mod.BYTETracker = FakeBYTE
+
+    import web_monitor
+    return web_monitor
 
 
 def test_review_agent():
@@ -56,11 +111,9 @@ def test_autonomous_agent():
 
 
 def test_manual_review_store():
-    review_dir = Path(r"C:\Users\Skyha\Desktop\pig_couter\output\agent_test")
-    if review_dir.exists():
-        shutil.rmtree(review_dir)
-    review_dir.mkdir(parents=True, exist_ok=True)
+    web_monitor = _import_web_monitor()
 
+    review_dir = Path(tempfile.mkdtemp(prefix="pig_agent_test_"))
     review_file = review_dir / "manual_reviews.jsonl"
     web_monitor.review_store["path"] = review_file
     with web_monitor.app_state["lock"]:
@@ -77,11 +130,15 @@ def test_manual_review_store():
 
     with web_monitor.app_state["lock"]:
         assert web_monitor.app_state["manual_reviews"][0]["note"] == "operator accepted restart"
+
+    shutil.rmtree(review_dir)
     print("OK manual_review_store")
 
 
 def test_generated_review_csv():
-    csv_path = Path(r"C:\Users\Skyha\Desktop\pig_couter\output\batch_rerun_group4_mindspore_review\batch_rerun_group4_results.csv")
+    csv_path = ROOT.parent.parent / "output" / "batch_rerun_group4_mindspore_review" / "batch_rerun_group4_results.csv"
+    if not csv_path.exists():
+        csv_path = ROOT.parent.parent / "output" / "batch_rerun_group4_review" / "batch_rerun_group4_results.csv"
     if not csv_path.exists():
         print("SKIP review_csv (missing generated file)")
         return
@@ -96,7 +153,9 @@ def test_generated_review_csv():
 
 
 def test_diagnosis_agent():
-    out_dir = Path(r"C:\Users\Skyha\Desktop\pig_couter\output\batch_rerun_group4_mindspore_review\17-37头")
+    out_dir = ROOT.parent.parent / "output" / "batch_rerun_group4_mindspore_review" / "17-37头"
+    if not out_dir.exists():
+        out_dir = ROOT.parent.parent / "output" / "batch_rerun_group4_review" / "17-37头"
     if not out_dir.exists():
         print("SKIP diagnosis_agent (missing rerun output)")
         return
