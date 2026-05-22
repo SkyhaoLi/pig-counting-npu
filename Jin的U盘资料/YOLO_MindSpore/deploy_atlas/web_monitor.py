@@ -4,9 +4,9 @@ Pig Counting Web Monitor - Atlas 200I DK A2
 Real-time RTSP/video stream + NPU inference + ByteTrack + Web UI + Agent
 
 Usage:
+    python3 web_monitor.py --port 8080 --om models/yolov8n_pig_fp16.om
+    python3 web_monitor.py --video datasets/si/11.mp4 --om models/yolov8n_pig_fp16.om
     python3 web_monitor.py --rtsp "rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
-    python3 web_monitor.py --video datasets/si/11.mp4
-    python3 web_monitor.py --rtsp "rtsp://..." --port 8080
 """
 
 import argparse
@@ -35,6 +35,7 @@ from pig_counting_agent import PigCountingAgent
 # ── Globals ──────────────────────────────────────────────────
 app_state = {
     'running': False,
+    'mode': 'idle',  # idle / running / finished
     'frame_jpeg': None,
     'fps_inference': 0,
     'fps_source': 0,
@@ -52,29 +53,30 @@ app_state = {
     'completed_result_dir': '',
     'lock': threading.Lock(),
     'reset_flag': False,
+    'stop_flag': False,
     'agent': None,
     'manual_reviews': [],
+    'diagnosis': None,
 }
-# ── Stream control (shared between grabber and inference) ──
+# ── Stream control ──
 stream_ctl = {
-    'cap': None,
-    'source': '',
-    'reconnect_flag': False,
-    'reconnect_result': None,
-    'lock': threading.Lock(),
+    'cap': None, 'source': '', 'reconnect_flag': False,
+    'reconnect_result': None, 'lock': threading.Lock(),
 }
 
 # ── Manual review store ──
 review_store = {"path": None}
 
+# ── Config (set in main) ──
+server_config = {"om_path": "", "output_dir": "", "conf_thres": 0.5,
+                 "track_thresh": 0.5, "out_ratio": 0.45, "wait_ratio": 0.25}
+
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+
 
 def append_manual_review(subject, decision, note=""):
-    entry = {
-        "ts": datetime.now().isoformat(timespec="seconds"),
-        "subject": subject,
-        "decision": decision,
-        "note": note,
-    }
+    entry = {"ts": datetime.now().isoformat(timespec="seconds"),
+             "subject": subject, "decision": decision, "note": note}
     path = review_store.get("path")
     if path:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +134,20 @@ def resolve_download_path(request_path):
     filename = RESULT_FILES.get(key)
     if request_path == '/download/csv':
         filename = RESULT_FILES['summary.csv']
+    if key == 'diagnosis.json':
+        with app_state['lock']:
+            d = app_state.get('completed_result_dir')
+        if d:
+            p = Path(d) / "ByteTrack_diagnosis.json"
+            return p if p.exists() else None
+        return None
+    if key == 'diagnosis.md':
+        with app_state['lock']:
+            d = app_state.get('completed_result_dir')
+        if d:
+            p = Path(d) / "ByteTrack_diagnosis.md"
+            return p if p.exists() else None
+        return None
     if not filename:
         return None
     with app_state['lock']:
@@ -162,13 +178,12 @@ def is_blue_object(frame, bbox, blue_threshold=1.3):
     return b > rg * blue_threshold and b > 80
 
 
-# ── Frame grabber thread (with reconnect support) ────────────
+# ── Frame grabber thread ─────────────────────────────────────
 latest_frame = {'frame': None, 'lock': threading.Lock()}
 MAX_RECONNECT_ATTEMPTS = 5
 
 
 def grabber_loop():
-    """Continuously grab frames; handle reconnect requests."""
     while app_state.get('running', True):
         with stream_ctl['lock']:
             if stream_ctl['reconnect_flag']:
@@ -191,7 +206,6 @@ def grabber_loop():
                 if not success:
                     stream_ctl['cap'] = None
                 continue
-
         cap = stream_ctl.get('cap')
         if cap is None:
             time.sleep(0.1)
@@ -220,6 +234,9 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
 
     if not cap.isOpened():
         print(f"[ERROR] Cannot open: {source}")
+        with app_state['lock']:
+            app_state['mode'] = 'idle'
+            app_state['running'] = False
         return
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -232,6 +249,8 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         app_state['source'] = source
         app_state['start_time'] = time.time()
         app_state['running'] = True
+        app_state['mode'] = 'running'
+        app_state['stop_flag'] = False
 
     analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
     output_root = Path(output_root)
@@ -265,7 +284,9 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         app_state['completed_result_dir'] = str(completed_result_dir)
 
     while app_state['running']:
-        # Check reset
+        if app_state['stop_flag']:
+            break
+
         if app_state['reset_flag']:
             export_result_files(analyzer, current_result_dir)
             snapshot_completed_results(current_result_dir, completed_result_dir)
@@ -279,7 +300,6 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             print("[RESET] Counters reset")
 
         if is_stream:
-            # Check if agent wants reconnect
             actions = agent.consume_actions()
             if actions.get("reconnect"):
                 with stream_ctl['lock']:
@@ -313,21 +333,14 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         else:
             ret, frame = cap.read()
             if not ret:
+                # Video finished — don't loop, go to finished state
                 export_result_files(analyzer, current_result_dir)
                 snapshot_completed_results(current_result_dir, completed_result_dir)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                frame_idx = 0
-                analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
-                tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
-                continue
+                break
 
         # Detect
         raw_dets = detector.detect(frame)
-        detections = []
-        for det in raw_dets:
-            if not is_blue_object(frame, det[:5]):
-                detections.append(det[:5])
-
+        detections = [det[:5] for det in raw_dets if not is_blue_object(frame, det[:5])]
         dets = np.array(detections) if detections else np.empty((0, 5))
         tracks = tracker.update(dets, (height, width), (height, width))
         active_tracks = [(int(t.track_id), t.tlbr) for t in tracks if t.is_activated]
@@ -344,11 +357,9 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         cv2.line(annotated, (int(analyzer.split_0), 0), (int(analyzer.split_0), height), (255, 128, 0), 2)
         cv2.line(annotated, (int(analyzer.split_1), 0), (int(analyzer.split_1), height), (0, 255, 255), 2)
         cv2.line(annotated, (int(analyzer.split_2), 0), (int(analyzer.split_2), height), (0, 255, 255), 2)
-
         total = get_total_count(analyzer)
         cv2.rectangle(annotated, (width - 200, 0), (width, 60), (0, 0, 0), -1)
         cv2.putText(annotated, f"TOTAL: {total}", (width - 190, 40), 0, 1.0, (0, 255, 0), 2)
-
         for tid, bbox in active_tracks:
             x1, y1, x2, y2 = map(int, bbox)
             np.random.seed(tid)
@@ -356,10 +367,8 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
             cv2.putText(annotated, f"{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
 
-        # Encode JPEG
         _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 55])
 
-        # FPS calc
         fps_counter += 1
         if time.time() - t_last >= 1.0:
             infer_fps = fps_counter / (time.time() - t_last)
@@ -384,421 +393,548 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
                 do_export = True
                 last_export = elapsed
 
-        # Agent: report frame metrics
-        agent.note_frame(frame_idx, infer_fps, total,
-                         app_state['valid_traj'], app_state['total_ids'])
-
+        agent.note_frame(frame_idx, infer_fps, total, app_state['valid_traj'], app_state['total_ids'])
         if do_export:
             export_result_files(analyzer, current_result_dir)
-
         frame_idx += 1
 
-    export_result_files(analyzer, current_result_dir)
+    # Cleanup
+    if not is_stream:
+        export_result_files(analyzer, current_result_dir)
+        snapshot_completed_results(current_result_dir, completed_result_dir)
     cap.release()
+    with app_state['lock']:
+        app_state['running'] = False
+        app_state['mode'] = 'finished'
 
 
-# ── HTTP server (no Flask dependency) ────────────────────────
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn
-import urllib.parse
+def start_inference(source):
+    """Start inference in a background thread. Called from HTTP handler."""
+    cfg = server_config
+    with app_state['lock']:
+        if app_state['mode'] == 'running':
+            return False
+        app_state['history'] = []
+        app_state['diagnosis'] = None
+        app_state['frame_jpeg'] = None
+    t = threading.Thread(target=inference_loop, args=(
+        source, cfg['om_path'], cfg['conf_thres'], cfg['track_thresh'],
+        cfg['out_ratio'], cfg['wait_ratio'], cfg['output_dir']), daemon=True)
+    t.start()
+    return True
 
-HTML_PAGE = '''<!DOCTYPE html>
+
+def stop_inference():
+    with app_state['lock']:
+        app_state['stop_flag'] = True
+        app_state['running'] = False
+
+
+def run_diagnosis():
+    """Run diagnosis on the latest completed results."""
+    agent = app_state.get('agent')
+    if not agent:
+        return None
+    with app_state['lock']:
+        completed_dir = app_state.get('completed_result_dir')
+        source = app_state.get('source', '')
+    if not completed_dir:
+        return None
+    completed_dir = Path(completed_dir)
+    video_name = Path(source).name if source else "unknown"
+    try:
+        diagnosis = agent.analyze(completed_dir, video_name)
+        agent.write_reports(completed_dir, diagnosis)
+        with app_state['lock']:
+            app_state['diagnosis'] = diagnosis
+        return diagnosis
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── HTML Page ───────────────────────────────────────────────
+HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pig Counter - Live Monitor</title>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>猪只计数监控系统</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-       background: #0f172a; color: #e2e8f0; }
-.header { background: #1e293b; padding: 12px 24px; display: flex;
-           align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
-.header h1 { font-size: 1.2rem; color: #38bdf8; }
-.header .status { font-size: 0.85rem; }
-.status .live { color: #22c55e; font-weight: bold; }
-.container { display: grid; grid-template-columns: 1fr 340px; gap: 16px;
-             padding: 16px; height: calc(100vh - 56px); }
-.video-panel { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
-.video-panel img { width: 100%; height: 100%; object-fit: contain; }
-.side-panel { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-.card { background: #1e293b; border-radius: 8px; padding: 16px; border: 1px solid #334155; }
-.card h3 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase;
-            letter-spacing: 0.05em; margin-bottom: 12px; }
-.big-number { font-size: 3rem; font-weight: 700; color: #22c55e; text-align: center; }
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.stat { text-align: center; padding: 8px; background: #0f172a; border-radius: 6px; }
-.stat .label { font-size: 0.75rem; color: #64748b; }
-.stat .value { font-size: 1.1rem; font-weight: 600; margin-top: 2px; }
-.line-stats { display: flex; flex-direction: column; gap: 6px; }
-.line-row { display: flex; justify-content: space-between; align-items: center;
-            padding: 6px 10px; background: #0f172a; border-radius: 4px; }
-.line-row .name { font-size: 0.85rem; }
-.line-row .count { font-size: 1rem; font-weight: 600; }
-.line0 .name { color: #fb923c; }
-.line1 .name, .line2 .name { color: #22d3ee; }
-.btn { display: inline-block; padding: 8px 16px; border-radius: 6px; border: none;
-       cursor: pointer; font-size: 0.85rem; font-weight: 500; text-decoration: none; }
-.btn-primary { background: #3b82f6; color: white; }
-.btn-primary:hover { background: #2563eb; }
-.btn-danger { background: #ef4444; color: white; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-canvas { width: 100%; height: 120px; }
-.badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
-.badge-healthy { background: #166534; color: #22c55e; }
-.badge-boot { background: #1e293b; color: #94a3b8; }
-.badge-warn { background: #713f12; color: #facc15; }
-.badge-recovering { background: #713f12; color: #fb923c; }
-.badge-error { background: #7f1d1d; color: #ef4444; }
-@media (max-width: 900px) {
-    .container { grid-template-columns: 1fr; }
-}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
+.header{background:#16213e;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #0f3460}
+.header h1{font-size:1.3rem;color:#4fc3f7}
+.header .status-badge{padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600}
+.badge-idle{background:#555;color:#ccc}
+.badge-running{background:#2e7d32;color:#a5d6a7}
+.badge-finished{background:#e65100;color:#ffcc80}
+.container{display:flex;height:calc(100vh - 52px)}
+.main-area{flex:1;padding:16px;overflow-y:auto}
+.sidebar{width:320px;background:#16213e;padding:16px;border-left:1px solid #0f3460;overflow-y:auto;display:none}
+/* ─ Idle Panel ─ */
+.idle-panel{max-width:700px;margin:40px auto}
+.tabs{display:flex;gap:4px;margin-bottom:16px}
+.tab-btn{padding:10px 20px;background:#0f3460;border:none;color:#aaa;cursor:pointer;border-radius:6px 6px 0 0;font-size:0.9rem}
+.tab-btn.active{background:#1a4080;color:#4fc3f7}
+.tab-content{background:#16213e;border-radius:0 8px 8px 8px;padding:24px}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+input[type=text],input[type=file]{width:100%;padding:10px;border-radius:6px;border:1px solid #333;background:#1a1a2e;color:#eee;margin-bottom:12px}
+.btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:0.9rem}
+.btn-primary{background:#1976d2;color:#fff}
+.btn-primary:hover{background:#1565c0}
+.btn-danger{background:#c62828;color:#fff}
+.btn-danger:hover{background:#b71c1c}
+.btn-success{background:#2e7d32;color:#fff}
+.btn-success:hover{background:#1b5e20}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.upload-zone{border:2px dashed #333;border-radius:8px;padding:40px;text-align:center;margin-bottom:16px;cursor:pointer}
+.upload-zone:hover{border-color:#4fc3f7}
+.file-list{list-style:none;max-height:200px;overflow-y:auto}
+.file-list li{padding:8px 12px;background:#1a1a2e;margin-bottom:4px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.file-list li.selected{border:1px solid #4fc3f7}
+.file-list li:hover{background:#222}
+/* ─ Running Panel ─ */
+.running-panel{display:none}
+.video-box{background:#000;border-radius:8px;overflow:hidden;position:relative}
+.video-box img{width:100%;display:block}
+.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.stat-card{background:#16213e;border-radius:8px;padding:12px;text-align:center}
+.stat-card .val{font-size:1.6rem;font-weight:700;color:#4fc3f7}
+.stat-card .lbl{font-size:0.75rem;color:#888;margin-top:4px}
+/* ─ Finished Panel ─ */
+.finished-panel{display:none;max-width:800px;margin:20px auto}
+.result-summary{background:#16213e;border-radius:8px;padding:20px;margin-bottom:16px}
+.diagnosis-box{background:#16213e;border-radius:8px;padding:20px;margin-top:16px}
+.diagnosis-box h3{color:#4fc3f7;margin-bottom:12px}
+.dl-links a{display:inline-block;margin-right:12px;color:#4fc3f7;text-decoration:none;padding:6px 12px;border:1px solid #4fc3f7;border-radius:4px;margin-top:8px}
+.dl-links a:hover{background:#4fc3f7;color:#000}
+.chart-box{height:180px;background:#111;border-radius:8px;margin-top:12px;position:relative}
+canvas{width:100%!important;height:100%!important}
+.progress-bar{height:4px;background:#333;border-radius:2px;margin-top:8px}
+.progress-bar .fill{height:100%;background:#4fc3f7;border-radius:2px;transition:width 0.3s}
 </style>
 </head>
 <body>
 <div class="header">
-    <h1>Pig Counter - NPU Live Monitor</h1>
-    <div class="status"><span class="live" id="status-dot">LIVE</span>
-        <span id="info-src"></span></div>
+  <h1>&#x1f437; 猪只计数监控系统</h1>
+  <span id="badge" class="status-badge badge-idle">空闲</span>
 </div>
 <div class="container">
-    <div class="video-panel">
-        <img id="stream" src="/stream" alt="Video Stream">
+<div class="main-area">
+<!-- IDLE -->
+<div class="idle-panel" id="panelIdle">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('camera')">摄像头</button>
+    <button class="tab-btn" onclick="switchTab('upload')">上传视频</button>
+  </div>
+  <div class="tab-content">
+    <div class="tab-pane active" id="tabCamera">
+      <p style="margin-bottom:12px;color:#aaa">输入 RTSP 地址开始实时监控</p>
+      <input type="text" id="rtspUrl" placeholder="rtsp://admin:admin123@192.168.1.108:554/...">
+      <button class="btn btn-primary" onclick="startCamera()">开始监控</button>
     </div>
-    <div class="side-panel">
-        <div class="card">
-            <h3>Total Count</h3>
-            <div class="big-number" id="total">0</div>
-        </div>
-        <div class="card">
-            <h3>Line Crossings</h3>
-            <div class="line-stats">
-                <div class="line-row line0">
-                    <span class="name">Line 0 (OUT mid)</span>
-                    <span class="count" id="line0">0</span>
-                </div>
-                <div class="line-row line1">
-                    <span class="name">Line 1 (OUT|WAIT)</span>
-                    <span class="count" id="line1">0</span>
-                </div>
-                <div class="line-row line2">
-                    <span class="name">Line 2 (WAIT|ENTRY)</span>
-                    <span class="count" id="line2">0</span>
-                </div>
-            </div>
-        </div>
-        <div class="card">
-            <h3>Statistics</h3>
-            <div class="stat-grid">
-                <div class="stat">
-                    <div class="label">Inference FPS</div>
-                    <div class="value" id="fps">0</div>
-                </div>
-                <div class="stat">
-                    <div class="label">Active IDs</div>
-                    <div class="value" id="ids">0</div>
-                </div>
-                <div class="stat">
-                    <div class="label">Valid Traj</div>
-                    <div class="value" id="valid">0</div>
-                </div>
-                <div class="stat">
-                    <div class="label">Frames</div>
-                    <div class="value" id="frames">0</div>
-                </div>
-            </div>
-        </div>
-        <div class="card" id="agent-card">
-            <h3>Agent Health</h3>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                <span id="agent-badge" class="badge badge-boot">BOOT</span>
-                <div style="flex:1;background:#0f172a;border-radius:4px;height:8px;">
-                    <div id="health-bar" style="width:100%;height:100%;background:#22c55e;border-radius:4px;transition:width 0.3s;"></div>
-                </div>
-                <span id="health-pct" style="font-size:0.8rem;">100%</span>
-            </div>
-            <div id="agent-events" style="max-height:120px;overflow-y:auto;font-size:0.75rem;color:#94a3b8;"></div>
-            <div style="margin-top:10px;">
-                <button class="btn btn-primary" onclick="showReviewForm()">Manual Review</button>
-            </div>
-            <div id="review-form" style="display:none;margin-top:10px;">
-                <select id="rev-subject" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
-                    <option value="stale_frame">Stale Frame</option>
-                    <option value="count_drift">Count Drift</option>
-                    <option value="low_fps">Low FPS</option>
-                    <option value="other">Other</option>
-                </select>
-                <select id="rev-decision" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
-                    <option value="confirmed">Confirmed</option>
-                    <option value="dismissed">Dismissed</option>
-                    <option value="escalated">Escalated</option>
-                </select>
-                <input id="rev-note" placeholder="Note (optional)" style="width:100%;margin-bottom:4px;padding:4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;">
-                <button class="btn btn-primary" onclick="submitReview()">Submit</button>
-                <button class="btn" onclick="hideReviewForm()" style="color:#94a3b8;">Cancel</button>
-            </div>
-        </div>
-        <div class="card">
-            <h3>Trend</h3>
-            <canvas id="chart"></canvas>
-        </div>
-        <div class="card">
-            <h3>Actions</h3>
-            <div class="actions">
-                <a class="btn btn-primary" href="/download/summary.csv" download>Summary CSV</a>
-                <a class="btn btn-primary" href="/download/id_events.csv" download>Events CSV</a>
-                <a class="btn btn-primary" href="/download/trajectory.csv" download>Trajectory CSV</a>
-                <a class="btn btn-primary" href="/download/state_changes.txt" download>State TXT</a>
-                <button class="btn btn-danger" onclick="resetCount()">Reset</button>
-            </div>
-        </div>
+    <div class="tab-pane" id="tabUpload">
+      <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <p>点击或拖拽视频文件到此处上传</p>
+        <p style="color:#666;font-size:0.8rem;margin-top:8px">支持 mp4/avi/mkv，最大 500MB</p>
+      </div>
+      <input type="file" id="fileInput" accept=".mp4,.avi,.mkv,.mov" style="display:none" onchange="uploadFile(this)">
+      <div class="progress-bar" id="uploadProgress" style="display:none"><div class="fill" id="uploadFill"></div></div>
+      <ul class="file-list" id="fileList"></ul>
+      <button class="btn btn-primary" id="btnStartVideo" disabled onclick="startVideo()">开始推理</button>
     </div>
+  </div>
+</div>
+<!-- RUNNING -->
+<div class="running-panel" id="panelRunning">
+  <div class="video-box"><img id="streamImg" src="/stream_frame"></div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="val" id="sTotal">0</div><div class="lbl">总计数</div></div>
+    <div class="stat-card"><div class="val" id="sFps">0</div><div class="lbl">推理 FPS</div></div>
+    <div class="stat-card"><div class="val" id="sValid">0</div><div class="lbl">有效轨迹</div></div>
+    <div class="stat-card"><div class="val" id="sIds">0</div><div class="lbl">总 ID 数</div></div>
+  </div>
+  <div style="margin-top:12px;text-align:right">
+    <button class="btn btn-danger" onclick="stopInference()">停止</button>
+  </div>
+  <div class="chart-box"><canvas id="chartCanvas"></canvas></div>
+</div>
+<!-- FINISHED -->
+<div class="finished-panel" id="panelFinished">
+  <div class="result-summary">
+    <h3 style="color:#4fc3f7;margin-bottom:12px">推理完成</h3>
+    <p>总计数: <strong id="fTotal">0</strong> | 有效轨迹: <strong id="fValid">0</strong> | 总 ID: <strong id="fIds">0</strong></p>
+    <div class="dl-links">
+      <a href="/download/summary.csv">汇总 CSV</a>
+      <a href="/download/id_events.csv">ID 事件</a>
+      <a href="/download/trajectory.csv">轨迹报告</a>
+    </div>
+  </div>
+  <div style="margin-bottom:12px">
+    <label style="color:#aaa;margin-right:8px">诊断来源:</label>
+    <select id="diagSource" style="padding:6px;border-radius:4px;background:#1a1a2e;color:#eee;border:1px solid #333">
+      <option value="current">当前监控结果</option>
+    </select>
+    <button class="btn btn-success" onclick="runDiagnosis()">生成诊断报告</button>
+  </div>
+  <div class="diagnosis-box" id="diagBox" style="display:none">
+    <h3>诊断报告</h3>
+    <div id="diagContent"></div>
+    <div class="dl-links" style="margin-top:12px">
+      <a href="/download/diagnosis.json">下载 JSON</a>
+      <a href="/download/diagnosis.md">下载 Markdown</a>
+    </div>
+  </div>
+  <div style="margin-top:16px">
+    <button class="btn btn-primary" onclick="backToIdle()">返回首页</button>
+  </div>
+</div>
+</div>
+<div class="sidebar" id="sidebar">
+  <h3 style="color:#4fc3f7;margin-bottom:12px">线计数</h3>
+  <div id="lineCounters"></div>
+  <h3 style="color:#4fc3f7;margin:16px 0 8px">Agent 状态</h3>
+  <div id="agentStatus" style="font-size:0.85rem;color:#aaa"></div>
+</div>
 </div>
 <script>
-function update() {
-    fetch('/api/stats').then(function(r){return r.json();}).then(function(d) {
-        document.getElementById('total').textContent = d.total_count;
-        document.getElementById('line0').textContent = d.line0;
-        document.getElementById('line1').textContent = d.line1;
-        document.getElementById('line2').textContent = d.line2;
-        document.getElementById('fps').textContent = d.fps_inference;
-        document.getElementById('ids').textContent = d.total_ids;
-        document.getElementById('valid').textContent = d.valid_traj;
-        document.getElementById('frames').textContent = d.frame_count;
-        document.getElementById('info-src').textContent =
-            d.resolution + ' | ' + d.fps_source + ' fps';
-        drawChart(d.history);
-        updateAgent(d.agent);
-    }).catch(function(){});
+let mode='idle', selectedFile=null, chart=null, historyData=[];
+function switchTab(t){
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===(t==='camera'?0:1)));
+  document.getElementById('tabCamera').classList.toggle('active',t==='camera');
+  document.getElementById('tabUpload').classList.toggle('active',t==='upload');
 }
-function updateAgent(agent) {
-    if (!agent) return;
-    var badge = document.getElementById('agent-badge');
-    badge.textContent = agent.status;
-    badge.className = 'badge badge-' + agent.status.toLowerCase();
-    document.getElementById('health-bar').style.width = agent.health_score + '%';
-    document.getElementById('health-bar').style.background =
-        agent.health_score > 60 ? '#22c55e' : agent.health_score > 30 ? '#facc15' : '#ef4444';
-    document.getElementById('health-pct').textContent = agent.health_score + '%';
-    var el = document.getElementById('agent-events');
-    el.innerHTML = (agent.events || []).map(function(e) {
-        var c = e.severity==='error'?'#ef4444':e.severity==='warn'?'#facc15':'#94a3b8';
-        return '<div style="padding:2px 0;border-bottom:1px solid #1e293b;">' +
-            '<span style="color:#64748b;">' + e.ts + '</span> ' +
-            '<span style="color:' + c + ';">' + e.message + '</span></div>';
-    }).join('');
+function showPanel(m){
+  mode=m;
+  document.getElementById('panelIdle').style.display=m==='idle'?'block':'none';
+  document.getElementById('panelRunning').style.display=m==='running'?'block':'none';
+  document.getElementById('panelFinished').style.display=m==='finished'?'block':'none';
+  document.getElementById('sidebar').style.display=m==='running'?'block':'none';
+  const b=document.getElementById('badge');
+  b.className='status-badge '+(m==='idle'?'badge-idle':m==='running'?'badge-running':'badge-finished');
+  b.textContent=m==='idle'?'空闲':m==='running'?'运行中':'已完成';
 }
-function drawChart(history) {
-    var c = document.getElementById('chart');
-    var ctx = c.getContext('2d');
-    c.width = c.offsetWidth * 2; c.height = c.offsetHeight * 2;
-    ctx.scale(2, 2);
-    var W = c.offsetWidth, H = c.offsetHeight;
-    ctx.clearRect(0, 0, W, H);
-    if (!history || history.length < 2) return;
-    var maxT = Math.max.apply(null, history.map(function(h){return h.total;})) || 1;
-    ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    history.forEach(function(h, i) {
-        var x = (i / (history.length - 1)) * W;
-        var y = H - (h.total / maxT) * (H - 10) - 5;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+function startCamera(){
+  const url=document.getElementById('rtspUrl').value.trim();
+  if(!url){alert('请输入RTSP地址');return;}
+  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:url})})
+  .then(r=>r.json()).then(d=>{if(d.ok)showPanel('running');else alert(d.error||'启动失败');});
+}
+function startVideo(){
+  if(!selectedFile){alert('请先选择视频');return;}
+  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'upload:'+selectedFile})})
+  .then(r=>r.json()).then(d=>{if(d.ok)showPanel('running');else alert(d.error||'启动失败');});
+}
+function stopInference(){
+  fetch('/api/stop',{method:'POST'}).then(()=>{});
+}
+function uploadFile(input){
+  const file=input.files[0];if(!file)return;
+  const fd=new FormData();fd.append('file',file);
+  const bar=document.getElementById('uploadProgress'),fill=document.getElementById('uploadFill');
+  bar.style.display='block';fill.style.width='0%';
+  const xhr=new XMLHttpRequest();
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=(e.loaded/e.total*100)+'%';};
+  xhr.onload=()=>{bar.style.display='none';if(xhr.status===200)loadUploads();else alert('上传失败');};
+  xhr.onerror=()=>{bar.style.display='none';alert('上传出错');};
+  xhr.open('POST','/api/upload');xhr.send(fd);
+}
+function loadUploads(){
+  fetch('/api/uploads').then(r=>r.json()).then(files=>{
+    const ul=document.getElementById('fileList');ul.innerHTML='';
+    const sel=document.getElementById('diagSource');
+    while(sel.options.length>1)sel.remove(1);
+    files.forEach(f=>{
+      const li=document.createElement('li');li.textContent=f;
+      li.onclick=()=>{selectedFile=f;document.querySelectorAll('.file-list li').forEach(x=>x.classList.remove('selected'));li.classList.add('selected');document.getElementById('btnStartVideo').disabled=false;};
+      ul.appendChild(li);
+      const opt=document.createElement('option');opt.value='upload:'+f;opt.textContent='上传: '+f;sel.appendChild(opt);
     });
-    ctx.stroke();
+  });
 }
-function resetCount() {
-    fetch('/api/reset', {method:'POST'}).then(function(r){return r.json();}).then(function(d) {
-        if (d.ok) {
-            document.getElementById('total').textContent = '0';
-            document.getElementById('line0').textContent = '0';
-            document.getElementById('line1').textContent = '0';
-            document.getElementById('line2').textContent = '0';
-            document.getElementById('frames').textContent = '0';
-            document.getElementById('ids').textContent = '0';
-            document.getElementById('valid').textContent = '0';
-            var c = document.getElementById('chart');
-            c.getContext('2d').clearRect(0,0,c.width,c.height);
-        }
-    });
+function runDiagnosis(){
+  const src=document.getElementById('diagSource').value;
+  fetch('/api/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src})})
+  .then(r=>r.json()).then(d=>{
+    if(d.error){alert(d.error);return;}
+    const box=document.getElementById('diagBox');box.style.display='block';
+    let html='<table style="width:100%;border-collapse:collapse">';
+    html+='<tr><td style="padding:6px;color:#aaa">主要原因</td><td style="padding:6px">'+esc(d.primary_cause||'-')+'</td></tr>';
+    html+='<tr><td style="padding:6px;color:#aaa">置信度</td><td style="padding:6px">'+(d.confidence||'-')+'</td></tr>';
+    html+='<tr><td style="padding:6px;color:#aaa">次要原因</td><td style="padding:6px">'+(d.secondary_causes||[]).join(', ')+'</td></tr>';
+    html+='<tr><td style="padding:6px;color:#aaa">可疑窗口</td><td style="padding:6px">'+(d.suspect_windows||[]).length+'个</td></tr>';
+    if(d.recommendation)html+='<tr><td style="padding:6px;color:#aaa">建议</td><td style="padding:6px">'+esc(d.recommendation)+'</td></tr>';
+    html+='</table>';
+    document.getElementById('diagContent').innerHTML=html;
+  });
 }
-function showReviewForm() { document.getElementById('review-form').style.display = 'block'; }
-function hideReviewForm() { document.getElementById('review-form').style.display = 'none'; }
-function submitReview() {
-    var body = JSON.stringify({
-        subject: document.getElementById('rev-subject').value,
-        decision: document.getElementById('rev-decision').value,
-        note: document.getElementById('rev-note').value
-    });
-    fetch('/api/review', {method:'POST', body:body, headers:{'Content-Type':'application/json'}})
-        .then(function(r){return r.json();})
-        .then(function(d){ if(d.ok) { hideReviewForm(); document.getElementById('rev-note').value=''; } });
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function backToIdle(){showPanel('idle');historyData=[];}
+function update(){
+  fetch('/api/stats').then(r=>r.json()).then(d=>{
+    if(d.mode==='running'&&mode!=='running')showPanel('running');
+    else if(d.mode==='finished'&&mode!=='finished'){
+      showPanel('finished');
+      document.getElementById('fTotal').textContent=d.total_count;
+      document.getElementById('fValid').textContent=d.valid_traj;
+      document.getElementById('fIds').textContent=d.total_ids;
+    }
+    if(d.mode==='running'){
+      document.getElementById('sTotal').textContent=d.total_count;
+      document.getElementById('sFps').textContent=d.fps_inference;
+      document.getElementById('sValid').textContent=d.valid_traj;
+      document.getElementById('sIds').textContent=d.total_ids;
+      document.getElementById('lineCounters').innerHTML=Object.entries(d.line_counters||{}).map(([k,v])=>'<div style="margin:4px 0">'+k+': <strong>'+v+'</strong></div>').join('');
+      document.getElementById('agentStatus').textContent='帧: '+d.frame_count+' | 源FPS: '+d.fps_source;
+      if(d.history&&d.history.length)historyData=d.history;
+      drawChart();
+    }
+  }).catch(()=>{});
 }
-setInterval(update, 500);
-update();
+function drawChart(){
+  const canvas=document.getElementById('chartCanvas');if(!canvas)return;
+  const ctx=canvas.getContext('2d'),W=canvas.parentElement.clientWidth,H=canvas.parentElement.clientHeight;
+  canvas.width=W;canvas.height=H;ctx.clearRect(0,0,W,H);
+  if(historyData.length<2)return;
+  const maxT=historyData[historyData.length-1].time,maxV=Math.max(...historyData.map(p=>p.total),1);
+  ctx.strokeStyle='#4fc3f7';ctx.lineWidth=2;ctx.beginPath();
+  historyData.forEach((p,i)=>{const x=p.time/maxT*(W-20)+10,y=H-10-p.total/maxV*(H-20);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.stroke();
+}
+let refreshImg;
+function refreshStream(){
+  const img=document.getElementById('streamImg');
+  if(mode==='running')img.src='/stream_frame?t='+Date.now();
+}
+setInterval(update,1500);
+setInterval(refreshStream,200);
+document.addEventListener('DOMContentLoaded',()=>{loadUploads();update();});
+const dz=document.getElementById('dropZone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='#4fc3f7';});
+dz.addEventListener('dragleave',()=>{dz.style.borderColor='#333';});
+dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='#333';const f=e.dataTransfer.files[0];if(f){document.getElementById('fileInput').files=e.dataTransfer.files;uploadFile(document.getElementById('fileInput'));}});
 </script>
 </body>
-</html>'''
+</html>"""
+# ── END HTML (JS follows) ──
+# ── HTTP Handler ─────────────────────────────────────────────
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+import urllib.parse
+import mimetypes
+
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
+    def log_message(self, fmt, *args):
         pass
 
+    def _json_response(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _html_response(self, html):
+        body = html.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
-        if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(HTML_PAGE.encode('utf-8'))
+        path = urllib.parse.urlparse(self.path).path
 
-        elif self.path == '/stream':
-            self.send_response(200)
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
-            self.send_header('Cache-Control', 'no-cache')
-            self.end_headers()
-            try:
-                while app_state['running']:
-                    with app_state['lock']:
-                        jpeg = app_state.get('frame_jpeg')
-                    if jpeg:
-                        self.wfile.write(b'--frame\r\n')
-                        self.wfile.write(b'Content-Type: image/jpeg\r\nContent-Length: ' + str(len(jpeg)).encode() + b'\r\n\r\n')
-                        self.wfile.write(jpeg)
-                        self.wfile.write(b'\r\n')
-                        self.wfile.flush()
-                    time.sleep(0.08)
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                pass
+        if path == '/' or path == '/index.html':
+            self._html_response(HTML_PAGE)
 
-        elif self.path == '/api/stats':
+        elif path == '/api/stats':
             with app_state['lock']:
                 data = {
-                    'total_count': app_state['total_count'],
-                    'line0': app_state['line_counters'].get('line0', 0),
-                    'line1': app_state['line_counters'].get('line1', 0),
-                    'line2': app_state['line_counters'].get('line2', 0),
+                    'mode': app_state['mode'],
                     'fps_inference': app_state['fps_inference'],
                     'fps_source': app_state['fps_source'],
                     'frame_count': app_state['frame_count'],
+                    'line_counters': app_state['line_counters'],
+                    'total_count': app_state['total_count'],
                     'valid_traj': app_state['valid_traj'],
                     'total_ids': app_state['total_ids'],
+                    'source': app_state['source'],
                     'resolution': app_state['resolution'],
-                    'history': app_state['history'][-60:],
-                    'manual_reviews': app_state.get('manual_reviews', [])[-10:],
+                    'history': app_state['history'][-200:],
                 }
-            agent = app_state.get('agent')
-            if agent:
-                data['agent'] = agent.snapshot()
-            else:
-                data['agent'] = None
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+            self._json_response(data)
 
-        elif self.path.startswith('/download/'):
-            file_path = resolve_download_path(self.path)
-            if not file_path:
+        elif path == '/stream_frame':
+            with app_state['lock']:
+                jpeg = app_state.get('frame_jpeg')
+            if jpeg:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(jpeg)))
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(jpeg)
+            else:
+                self.send_response(204)
+                self.end_headers()
+
+        elif path == '/api/uploads':
+            upload_dir = Path(server_config['output_dir']) / 'uploads'
+            files = []
+            if upload_dir.exists():
+                files = sorted([f.name for f in upload_dir.iterdir() if f.is_file()])
+            self._json_response(files)
+
+        elif path == '/api/diagnosis':
+            with app_state['lock']:
+                diag = app_state.get('diagnosis')
+            if diag:
+                self._json_response(diag)
+            else:
+                self._json_response({'error': '暂无诊断报告'}, 404)
+
+        elif path.startswith('/download/'):
+            fpath = resolve_download_path(path)
+            if fpath and fpath.exists():
+                self.send_response(200)
+                ct = mimetypes.guess_type(str(fpath))[0] or 'application/octet-stream'
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Disposition', f'attachment; filename="{fpath.name}"')
+                data = fpath.read_bytes()
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
                 self.send_response(404)
                 self.end_headers()
-                return
-            self.send_response(200)
-            content_type = 'text/plain'
-            if file_path.suffix == '.csv':
-                content_type = 'text/csv'
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Disposition', f'attachment; filename={file_path.name}')
-            self.end_headers()
-            self.wfile.write(file_path.read_bytes())
-
         else:
             self.send_response(404)
             self.end_headers()
 
     def do_POST(self):
-        if self.path == '/api/reset':
-            with app_state['lock']:
-                app_state['reset_flag'] = True
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(b'{"ok":true}')
+        path = urllib.parse.urlparse(self.path).path
 
-        elif self.path == '/api/review':
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
-            try:
-                payload = json.loads(body)
-                subject = payload.get('subject', 'unknown')
-                decision = payload.get('decision', 'noted')
-                note = payload.get('note', '')
-                entry = append_manual_review(subject, decision, note)
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "entry": entry}).encode())
-            except Exception as e:
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+        if path == '/api/start':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            source = body.get('source', '')
+            if source.startswith('upload:'):
+                filename = source[7:]
+                upload_dir = Path(server_config['output_dir']) / 'uploads'
+                filepath = upload_dir / filename
+                if not filepath.exists():
+                    self._json_response({'ok': False, 'error': '文件不存在'}, 400)
+                    return
+                source = str(filepath)
+            if not source:
+                self._json_response({'ok': False, 'error': '未指定数据源'}, 400)
+                return
+            ok = start_inference(source)
+            if ok:
+                self._json_response({'ok': True})
+            else:
+                self._json_response({'ok': False, 'error': '已有推理在运行'}, 409)
 
+        elif path == '/api/stop':
+            stop_inference()
+            self._json_response({'ok': True})
+
+        elif path == '/api/upload':
+            content_type = self.headers.get('Content-Type', '')
+            if 'multipart/form-data' not in content_type:
+                self._json_response({'error': '需要 multipart/form-data'}, 400)
+                return
+            length = int(self.headers.get('Content-Length', 0))
+            if length > MAX_UPLOAD_SIZE:
+                self._json_response({'error': '文件过大'}, 413)
+                return
+            boundary = content_type.split('boundary=')[1].encode()
+            raw = self.rfile.read(length)
+            filename, filedata = self._parse_multipart(raw, boundary)
+            if not filename:
+                self._json_response({'error': '未找到文件'}, 400)
+                return
+            upload_dir = Path(server_config['output_dir']) / 'uploads'
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            dest = upload_dir / Path(filename).name
+            dest.write_bytes(filedata)
+            self._json_response({'ok': True, 'filename': dest.name})
+
+        elif path == '/api/diagnose':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            result = run_diagnosis()
+            if result:
+                self._json_response(result)
+            else:
+                self._json_response({'error': '无法生成诊断报告，请先完成一次推理'}, 400)
         else:
             self.send_response(404)
             self.end_headers()
 
+    def _parse_multipart(self, raw, boundary):
+        parts = raw.split(b'--' + boundary)
+        for part in parts:
+            if b'filename="' not in part:
+                continue
+            header_end = part.find(b'\r\n\r\n')
+            if header_end < 0:
+                continue
+            header = part[:header_end].decode('utf-8', errors='replace')
+            fn_start = header.find('filename="') + 10
+            fn_end = header.find('"', fn_start)
+            filename = header[fn_start:fn_end]
+            data = part[header_end + 4:]
+            if data.endswith(b'\r\n'):
+                data = data[:-2]
+            return filename, data
+        return None, None
 
+
+# ── Main ─────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description='Pig Counter Web Monitor')
-    parser.add_argument('--rtsp', type=str, help='RTSP stream URL (full)')
-    parser.add_argument('--camera_ip', type=str, help='Camera IP (builds RTSP URL)')
-    parser.add_argument('--camera_user', type=str, default='admin')
-    parser.add_argument('--camera_pass', type=str, default='admin123')
-    parser.add_argument('--video', type=str, help='Local video file path')
-    parser.add_argument('--om', type=str, default='models/yolov8n_pig_fp16.om')
+    parser = argparse.ArgumentParser(description="Pig Counting Web Monitor")
     parser.add_argument('--port', type=int, default=8080)
-    parser.add_argument('--conf_thres', type=float, default=0.5)
-    parser.add_argument('--track_thresh', type=float, default=0.5)
-    parser.add_argument('--out_ratio', type=float, default=0.45)
-    parser.add_argument('--wait_ratio', type=float, default=0.25)
-    parser.add_argument('--output_dir', type=str, default='output/web_monitor')
+    parser.add_argument('--om', type=str, default='models/yolov8n_pig_fp16.om')
+    parser.add_argument('--video', type=str, default='')
+    parser.add_argument('--rtsp', type=str, default='')
+    parser.add_argument('--output', type=str, default='output_web')
+    parser.add_argument('--conf', type=float, default=0.5)
+    parser.add_argument('--track-thresh', type=float, default=0.5)
+    parser.add_argument('--out-ratio', type=float, default=0.45)
+    parser.add_argument('--wait-ratio', type=float, default=0.25)
     args = parser.parse_args()
 
-    if args.camera_ip:
-        source = f"rtsp://{args.camera_user}:{args.camera_pass}@{args.camera_ip}:554/cam/realmonitor?channel=1&subtype=1"
-    else:
-        source = args.rtsp or args.video
-    if not source:
-        print("Error: specify --camera_ip, --rtsp, or --video")
-        sys.exit(1)
+    server_config['om_path'] = args.om
+    server_config['output_dir'] = args.output
+    server_config['conf_thres'] = args.conf
+    server_config['track_thresh'] = args.track_thresh
+    server_config['out_ratio'] = args.out_ratio
+    server_config['wait_ratio'] = args.wait_ratio
 
-    review_store["path"] = Path(args.output_dir) / "manual_reviews.jsonl"
+    Path(args.output).mkdir(parents=True, exist_ok=True)
+    review_store["path"] = str(Path(args.output) / "manual_reviews.jsonl")
 
-    print(f"Source: {source}")
-    print(f"Model: {args.om}")
-    print(f"Web UI: http://0.0.0.0:{args.port}")
-
-    t = threading.Thread(target=inference_loop, args=(
-        source, args.om, args.conf_thres, args.track_thresh,
-        args.out_ratio, args.wait_ratio, args.output_dir), daemon=True)
-    t.start()
-
-    print("Waiting for first frame...")
-    for _ in range(100):
-        if app_state['frame_jpeg'] is not None:
-            break
-        time.sleep(0.1)
+    source = args.rtsp or args.video
+    if source:
+        start_inference(source)
 
     server = ThreadedHTTPServer(('0.0.0.0', args.port), Handler)
-    print(f"\n>>> Open http://192.168.137.100:{args.port} in your browser <<<\n")
+    print(f"[WEB] http://0.0.0.0:{args.port}")
+    print(f"[MODE] {'Auto-started: ' + source if source else 'Idle — waiting for frontend control'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        app_state['running'] = False
+        stop_inference()
         server.shutdown()
-        print("\nShutdown.")
+        print("\n[EXIT] Server stopped")
 
 
 if __name__ == '__main__':
