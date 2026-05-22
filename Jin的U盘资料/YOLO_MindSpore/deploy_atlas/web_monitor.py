@@ -189,7 +189,7 @@ def is_blue_object(frame, bbox, blue_threshold=1.3):
 
 # ── Frame grabber ────────────────────────────────────────────
 latest_frame = {'frame': None, 'lock': threading.Lock()}
-MAX_RECONNECT_ATTEMPTS = 5
+MAX_RECONNECT_ATTEMPTS = 3
 
 
 def grabber_loop():
@@ -758,7 +758,7 @@ function loadHistory(){
       let acts='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/summary.csv" download>汇总</a>';
       acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/trajectory.csv" download>轨迹</a>';
       if(r.diagnosis){
-        acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/diagnosis.json" download>诊断</a>';
+        acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/diagnosis.txt" download>诊断</a>';
       } else {
         acts+='<button class="btn btn-success btn-sm" onclick="runDiagnosis(&quot;'+r.id+'&quot;)">诊断</button>';
       }
@@ -951,13 +951,19 @@ class Handler(BaseHTTPRequestHandler):
         elif key == 'diagnosis.json':
             d = app_state.get('completed_result_dir')
             if d:
-                p = Path(d) / "ByteTrack_diagnosis.json"
+                p = Path(d) / "ByteTrack_diagnosis.txt"
                 return p if p.exists() else None
             return None
         elif key == 'diagnosis.md':
             d = app_state.get('completed_result_dir')
             if d:
-                p = Path(d) / "ByteTrack_diagnosis.md"
+                p = Path(d) / "ByteTrack_diagnosis.txt"
+                return p if p.exists() else None
+            return None
+        elif key == 'diagnosis.txt':
+            d = app_state.get('completed_result_dir')
+            if d:
+                p = Path(d) / "ByteTrack_diagnosis.txt"
                 return p if p.exists() else None
             return None
         if not filename:
@@ -981,10 +987,19 @@ class Handler(BaseHTTPRequestHandler):
             filename = RESULT_FILES['summary.csv']
         elif key == 'trajectory.csv':
             filename = RESULT_FILES['trajectory.csv']
-        elif key == 'diagnosis.json':
-            return result_dir / "ByteTrack_diagnosis.json"
-        elif key == 'diagnosis.md':
-            return result_dir / "ByteTrack_diagnosis.md"
+        elif key in ('diagnosis.json', 'diagnosis.md', 'diagnosis.txt'):
+            txt_path = result_dir / "ByteTrack_diagnosis.txt"
+            if txt_path.exists():
+                return txt_path
+            if record.get('diagnosis'):
+                agent = app_state.get('agent')
+                if not agent:
+                    agent = PigCountingAgent(log_dir=server_config['output_dir'])
+                result_dir.mkdir(parents=True, exist_ok=True)
+                agent.write_reports(result_dir, record['diagnosis'])
+                if txt_path.exists():
+                    return txt_path
+            return None
         else:
             filename = RESULT_FILES.get(key)
         if not filename:

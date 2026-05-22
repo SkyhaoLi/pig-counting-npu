@@ -417,54 +417,52 @@ class PigCountingAgent:
 
     def write_reports(self, output_dir, diagnosis):
         output_dir = Path(output_dir)
-        json_path = output_dir / f"{self.tracker_name}_diagnosis.json"
-        md_path = output_dir / f"{self.tracker_name}_diagnosis.md"
-
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(diagnosis, f, ensure_ascii=False, indent=2)
+        txt_path = output_dir / f"{self.tracker_name}_diagnosis.txt"
 
         lines = [
-            f"# {diagnosis['video']} 诊断报告", "",
-            f"- 主因：{diagnosis['primary_cause']}",
-            f"- 次要原因：{', '.join(diagnosis['secondary_causes']) if diagnosis['secondary_causes'] else '无'}",
-            f"- 诊断置信度：{diagnosis['diagnosis_confidence']}", "",
-            "## 证据", "",
+            f"{'='*60}",
+            f"  {diagnosis['video']} 诊断报告",
+            f"{'='*60}", "",
+            f"主因：{diagnosis['primary_cause']}",
+            f"次要原因：{', '.join(diagnosis['secondary_causes']) if diagnosis['secondary_causes'] else '无'}",
+            f"诊断置信度：{diagnosis['diagnosis_confidence']}", "",
+            f"{'-'*60}",
+            "证据：", "",
         ]
         for item in diagnosis["evidence"]:
-            lines.append(f"- {item}")
+            lines.append(f"  - {item}")
 
         problem_tracks = diagnosis.get("problem_tracks", [])
         if problem_tracks:
-            lines.extend(["", "## 问题轨迹详情", ""])
-            lines.append("| 类型 | 轨迹ID | 时间段 | 影响 | 详情 |")
-            lines.append("|------|--------|--------|------|------|")
+            lines.extend(["", f"{'-'*60}", "问题轨迹详情：", ""])
             for pt in problem_tracks:
                 ids_str = ",".join(str(x) for x in pt["track_ids"])
-                lines.append(
-                    f"| {pt['type']} | {ids_str} | {pt['time_range']} "
-                    f"| {pt['impact']} | {pt['detail']} |")
+                lines.append(f"  类型: {pt['type']}  轨迹ID: {ids_str}  时间段: {pt['time_range']}  影响: {pt['impact']}")
+                lines.append(f"  详情: {pt['detail']}")
+                lines.append("")
 
-        lines.extend(["", "## 可疑时间窗口", ""])
+        lines.extend(["", f"{'-'*60}", "可疑时间窗口：", ""])
         if diagnosis["suspect_windows"]:
             for window in diagnosis["suspect_windows"]:
                 lines.append(
-                    f"- {window['label']}：{window['start_s']:.2f}s - "
+                    f"  {window['label']}：{window['start_s']:.2f}s - "
                     f"{window['end_s']:.2f}s，轨迹 {window['tracks']}")
         else:
-            lines.append("- 无明显可疑窗口")
+            lines.append("  无明显可疑窗口")
 
-        lines.extend(["", "## 汇总", ""])
+        lines.extend(["", f"{'-'*60}", "汇总：", ""])
         summary = diagnosis["summary"]
-        lines.append(f"- total_line: {summary.get('total_line')}")
-        lines.append(f"- valid_traj: {summary.get('valid_traj')}")
-        lines.append(f"- total_ids: {summary.get('total_ids')}")
-        lines.append(f"- raw_error: {diagnosis.get('raw_error')}")
-        lines.append(f"- paper_error: {diagnosis.get('paper_error')}")
+        lines.append(f"  total_line: {summary.get('total_line')}")
+        lines.append(f"  valid_traj: {summary.get('valid_traj')}")
+        lines.append(f"  total_ids: {summary.get('total_ids')}")
+        lines.append(f"  raw_error: {diagnosis.get('raw_error')}")
+        lines.append(f"  paper_error: {diagnosis.get('paper_error')}")
+        lines.append(f"\n{'='*60}")
 
-        with open(md_path, "w", encoding="utf-8") as f:
+        with open(txt_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
-        return json_path, md_path
+        return txt_path
 
     # ══════════════════════════════════════════════════════════════
     # Private helpers (diagnosis)
