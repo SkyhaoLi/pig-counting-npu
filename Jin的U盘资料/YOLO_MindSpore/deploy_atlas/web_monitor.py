@@ -5,8 +5,8 @@ Real-time RTSP/video stream + NPU inference + ByteTrack + Web UI + Agent
 
 Usage:
     python3 web_monitor.py --port 8080 --om models/yolov8n_pig_fp16.om
-    python3 web_monitor.py --video datasets/si/11.mp4 --om models/yolov8n_pig_fp16.om
-    python3 web_monitor.py --rtsp "rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
+    python3 web_monitor.py --video videos/test.mp4 --om models/yolov8n_pig_fp16.om
+    python3 web_monitor.py --rtsp "rtsp://admin:admin123@192.168.1.108:554/..."
 """
 
 import argparse
@@ -35,7 +35,7 @@ from pig_counting_agent import PigCountingAgent
 # ── Globals ──────────────────────────────────────────────────
 app_state = {
     'running': False,
-    'mode': 'idle',  # idle / running / finished
+    'mode': 'idle',
     'frame_jpeg': None,
     'fps_inference': 0,
     'fps_source': 0,
@@ -48,6 +48,13 @@ app_state = {
     'source': '',
     'resolution': '',
     'history': [],
+    'agent_status': 'BOOT',
+    'health_score': 100.0,
+    'anomaly_count': 0,
+    'recovery_count': 0,
+    'latest_event': '',
+    'agent_events': [],
+    'manual_reviews': [],
     'result_root': '',
     'current_result_dir': '',
     'completed_result_dir': '',
@@ -55,23 +62,19 @@ app_state = {
     'reset_flag': False,
     'stop_flag': False,
     'agent': None,
-    'manual_reviews': [],
     'diagnosis': None,
+    'inference_history': [],
 }
-# ── Stream control ──
+
 stream_ctl = {
     'cap': None, 'source': '', 'reconnect_flag': False,
     'reconnect_result': None, 'lock': threading.Lock(),
 }
 
-# ── Manual review store ──
 review_store = {"path": None}
-
-# ── Config (set in main) ──
 server_config = {"om_path": "", "output_dir": "", "conf_thres": 0.5,
                  "track_thresh": 0.5, "out_ratio": 0.45, "wait_ratio": 0.25}
-
-MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
 
 def append_manual_review(subject, decision, note=""):
@@ -84,13 +87,51 @@ def append_manual_review(subject, decision, note=""):
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     with app_state['lock']:
         reviews = app_state["manual_reviews"]
-        reviews.append(entry)
-        if len(reviews) > 50:
-            app_state["manual_reviews"] = reviews[-50:]
+        reviews.insert(0, entry)
+        app_state["manual_reviews"] = reviews[:12]
     return entry
 
 
-# ── Zone helpers ─────────────────────────────────────────────
+def _history_path():
+    return Path(server_config['output_dir']) / 'inference_history.json'
+
+
+def load_inference_history():
+    p = _history_path()
+    if p.exists():
+        try:
+            with open(p, encoding='utf-8') as f:
+                app_state['inference_history'] = json.load(f)
+        except Exception:
+            app_state['inference_history'] = []
+
+
+def save_inference_history():
+    p = _history_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, 'w', encoding='utf-8') as f:
+        json.dump(app_state['inference_history'], f, ensure_ascii=False, indent=2)
+
+
+def append_inference_record(source, total_count, valid_traj, total_ids, result_dir, duration_s):
+    record = {
+        'id': datetime.now().strftime('%Y%m%d_%H%M%S'),
+        'ts': datetime.now().isoformat(timespec='seconds'),
+        'source': Path(source).name if source else 'unknown',
+        'total_count': total_count,
+        'valid_traj': valid_traj,
+        'total_ids': total_ids,
+        'result_dir': str(result_dir),
+        'duration_s': round(duration_s, 1),
+        'diagnosis': None,
+    }
+    with app_state['lock']:
+        app_state['inference_history'].insert(0, record)
+    save_inference_history()
+    return record
+
+
+# ── Helpers ──────────────────────────────────────────────────
 RESULT_FILES = {
     'summary.csv': 'ByteTrack_summary.csv',
     'id_events.csv': 'ByteTrack_id_events.csv',
@@ -129,38 +170,6 @@ def snapshot_completed_results(current_dir, completed_dir):
             shutil.copy2(src, completed_dir / filename)
 
 
-def resolve_download_path(request_path):
-    key = request_path.rsplit('/', 1)[-1]
-    filename = RESULT_FILES.get(key)
-    if request_path == '/download/csv':
-        filename = RESULT_FILES['summary.csv']
-    if key == 'diagnosis.json':
-        with app_state['lock']:
-            d = app_state.get('completed_result_dir')
-        if d:
-            p = Path(d) / "ByteTrack_diagnosis.json"
-            return p if p.exists() else None
-        return None
-    if key == 'diagnosis.md':
-        with app_state['lock']:
-            d = app_state.get('completed_result_dir')
-        if d:
-            p = Path(d) / "ByteTrack_diagnosis.md"
-            return p if p.exists() else None
-        return None
-    if not filename:
-        return None
-    with app_state['lock']:
-        completed_dir = Path(app_state['completed_result_dir']) if app_state['completed_result_dir'] else None
-        current_dir = Path(app_state['current_result_dir']) if app_state['current_result_dir'] else None
-    for base in (completed_dir, current_dir):
-        if base:
-            candidate = base / filename
-            if candidate.exists():
-                return candidate
-    return None
-
-
 def is_blue_object(frame, bbox, blue_threshold=1.3):
     x1, y1, x2, y2 = map(int, bbox[:4])
     h, w = frame.shape[:2]
@@ -178,7 +187,7 @@ def is_blue_object(frame, bbox, blue_threshold=1.3):
     return b > rg * blue_threshold and b > 80
 
 
-# ── Frame grabber thread ─────────────────────────────────────
+# ── Frame grabber ────────────────────────────────────────────
 latest_frame = {'frame': None, 'lock': threading.Lock()}
 MAX_RECONNECT_ATTEMPTS = 5
 
@@ -218,9 +227,33 @@ def grabber_loop():
             latest_frame['frame'] = frame
 
 
-# ── Inference thread ─────────────────────────────────────────
+# ── Inference loop ───────────────────────────────────────────
+_detector_instance = None
+_detector_lock = threading.Lock()
+
+
+def get_detector(om_path, conf_thres):
+    global _detector_instance
+    with _detector_lock:
+        if _detector_instance is None:
+            _detector_instance = NPUDetector(om_path, conf_thres=conf_thres)
+        return _detector_instance
+
+
 def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
-    detector = NPUDetector(om_path, conf_thres=conf_thres)
+    try:
+        _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root)
+    except Exception as e:
+        print(f"[ERROR] inference_loop crashed: {e}")
+        import traceback
+        traceback.print_exc()
+        with app_state['lock']:
+            app_state['running'] = False
+            app_state['mode'] = 'idle'
+
+
+def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
+    detector = get_detector(om_path, conf_thres)
     agent = PigCountingAgent(log_dir=output_root)
     app_state['agent'] = agent
 
@@ -254,7 +287,8 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
 
     analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
     output_root = Path(output_root)
-    current_result_dir = output_root / "current"
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    current_result_dir = output_root / "runs" / run_id
     completed_result_dir = output_root / "latest_completed"
     current_result_dir.mkdir(parents=True, exist_ok=True)
     completed_result_dir.mkdir(parents=True, exist_ok=True)
@@ -333,12 +367,10 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         else:
             ret, frame = cap.read()
             if not ret:
-                # Video finished — don't loop, go to finished state
                 export_result_files(analyzer, current_result_dir)
                 snapshot_completed_results(current_result_dir, completed_result_dir)
                 break
 
-        # Detect
         raw_dets = detector.detect(frame)
         detections = [det[:5] for det in raw_dets if not is_blue_object(frame, det[:5])]
         dets = np.array(detections) if detections else np.empty((0, 5))
@@ -352,7 +384,6 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             bh = bbox[3] - bbox[1]
             analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None)
 
-        # Draw
         annotated = frame.copy()
         cv2.line(annotated, (int(analyzer.split_0), 0), (int(analyzer.split_0), height), (255, 128, 0), 2)
         cv2.line(annotated, (int(analyzer.split_1), 0), (int(analyzer.split_1), height), (0, 255, 255), 2)
@@ -377,6 +408,11 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
         else:
             infer_fps = app_state['fps_inference']
 
+        valid_traj = count_valid_trajectories(analyzer)
+        total_ids = len(analyzer.trajectories)
+        agent.note_frame(frame_idx, infer_fps, total, valid_traj, total_ids)
+        snapshot = agent.snapshot()
+
         do_export = False
         with app_state['lock']:
             app_state['frame_jpeg'] = jpeg.tobytes()
@@ -384,8 +420,14 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
             app_state['frame_count'] = frame_idx
             app_state['line_counters'] = dict(analyzer.line_counters)
             app_state['total_count'] = total
-            app_state['valid_traj'] = count_valid_trajectories(analyzer)
-            app_state['total_ids'] = len(analyzer.trajectories)
+            app_state['valid_traj'] = valid_traj
+            app_state['total_ids'] = total_ids
+            app_state['agent_status'] = snapshot['status']
+            app_state['health_score'] = snapshot['health_score']
+            app_state['anomaly_count'] = snapshot['anomaly_count']
+            app_state['recovery_count'] = snapshot['recovery_count']
+            app_state['latest_event'] = snapshot['latest_event']
+            app_state['agent_events'] = snapshot['events']
             elapsed = time.time() - app_state['start_time']
             if len(app_state['history']) == 0 or elapsed - app_state['history'][-1]['time'] >= 5:
                 app_state['history'].append({'time': round(elapsed, 1), 'total': total})
@@ -393,23 +435,25 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
                 do_export = True
                 last_export = elapsed
 
-        agent.note_frame(frame_idx, infer_fps, total, app_state['valid_traj'], app_state['total_ids'])
         if do_export:
             export_result_files(analyzer, current_result_dir)
         frame_idx += 1
 
-    # Cleanup
     if not is_stream:
         export_result_files(analyzer, current_result_dir)
         snapshot_completed_results(current_result_dir, completed_result_dir)
     cap.release()
+    duration = time.time() - app_state['start_time'] if app_state['start_time'] else 0
     with app_state['lock']:
+        final_total = app_state['total_count']
+        final_valid = app_state['valid_traj']
+        final_ids = app_state['total_ids']
         app_state['running'] = False
         app_state['mode'] = 'finished'
+    append_inference_record(source, final_total, final_valid, final_ids, str(current_result_dir), duration)
 
 
 def start_inference(source):
-    """Start inference in a background thread. Called from HTTP handler."""
     cfg = server_config
     with app_state['lock']:
         if app_state['mode'] == 'running':
@@ -431,7 +475,6 @@ def stop_inference():
 
 
 def run_diagnosis():
-    """Run diagnosis on the latest completed results."""
     agent = app_state.get('agent')
     if not agent:
         return None
@@ -447,283 +490,340 @@ def run_diagnosis():
         agent.write_reports(completed_dir, diagnosis)
         with app_state['lock']:
             app_state['diagnosis'] = diagnosis
+            if app_state['inference_history']:
+                app_state['inference_history'][0]['diagnosis'] = diagnosis
+        save_inference_history()
         return diagnosis
     except Exception as e:
         return {"error": str(e)}
 
 
-# ── HTML Page ───────────────────────────────────────────────
-HTML_PAGE = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>猪只计数监控系统</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
-.header{background:#16213e;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #0f3460}
-.header h1{font-size:1.3rem;color:#4fc3f7}
-.header .status-badge{padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600}
-.badge-idle{background:#555;color:#ccc}
-.badge-running{background:#2e7d32;color:#a5d6a7}
-.badge-finished{background:#e65100;color:#ffcc80}
-.container{display:flex;height:calc(100vh - 52px)}
-.main-area{flex:1;padding:16px;overflow-y:auto}
-.sidebar{width:320px;background:#16213e;padding:16px;border-left:1px solid #0f3460;overflow-y:auto;display:none}
-/* ─ Idle Panel ─ */
-.idle-panel{max-width:700px;margin:40px auto}
-.tabs{display:flex;gap:4px;margin-bottom:16px}
-.tab-btn{padding:10px 20px;background:#0f3460;border:none;color:#aaa;cursor:pointer;border-radius:6px 6px 0 0;font-size:0.9rem}
-.tab-btn.active{background:#1a4080;color:#4fc3f7}
-.tab-content{background:#16213e;border-radius:0 8px 8px 8px;padding:24px}
-.tab-pane{display:none}
-.tab-pane.active{display:block}
-input[type=text],input[type=file]{width:100%;padding:10px;border-radius:6px;border:1px solid #333;background:#1a1a2e;color:#eee;margin-bottom:12px}
-.btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:0.9rem}
-.btn-primary{background:#1976d2;color:#fff}
-.btn-primary:hover{background:#1565c0}
-.btn-danger{background:#c62828;color:#fff}
-.btn-danger:hover{background:#b71c1c}
-.btn-success{background:#2e7d32;color:#fff}
-.btn-success:hover{background:#1b5e20}
-.btn:disabled{opacity:0.5;cursor:not-allowed}
-.upload-zone{border:2px dashed #333;border-radius:8px;padding:40px;text-align:center;margin-bottom:16px;cursor:pointer}
-.upload-zone:hover{border-color:#4fc3f7}
-.file-list{list-style:none;max-height:200px;overflow-y:auto}
-.file-list li{padding:8px 12px;background:#1a1a2e;margin-bottom:4px;border-radius:4px;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
-.file-list li.selected{border:1px solid #4fc3f7}
-.file-list li:hover{background:#222}
-/* ─ Running Panel ─ */
-.running-panel{display:none}
-.video-box{background:#000;border-radius:8px;overflow:hidden;position:relative}
-.video-box img{width:100%;display:block}
-.stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
-.stat-card{background:#16213e;border-radius:8px;padding:12px;text-align:center}
-.stat-card .val{font-size:1.6rem;font-weight:700;color:#4fc3f7}
-.stat-card .lbl{font-size:0.75rem;color:#888;margin-top:4px}
-/* ─ Finished Panel ─ */
-.finished-panel{display:none;max-width:800px;margin:20px auto}
-.result-summary{background:#16213e;border-radius:8px;padding:20px;margin-bottom:16px}
-.diagnosis-box{background:#16213e;border-radius:8px;padding:20px;margin-top:16px}
-.diagnosis-box h3{color:#4fc3f7;margin-bottom:12px}
-.dl-links a{display:inline-block;margin-right:12px;color:#4fc3f7;text-decoration:none;padding:6px 12px;border:1px solid #4fc3f7;border-radius:4px;margin-top:8px}
-.dl-links a:hover{background:#4fc3f7;color:#000}
-.chart-box{height:180px;background:#111;border-radius:8px;margin-top:12px;position:relative}
-canvas{width:100%!important;height:100%!important}
-.progress-bar{height:4px;background:#333;border-radius:2px;margin-top:8px}
-.progress-bar .fill{height:100%;background:#4fc3f7;border-radius:2px;transition:width 0.3s}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>&#x1f437; 猪只计数监控系统</h1>
-  <span id="badge" class="status-badge badge-idle">空闲</span>
-</div>
-<div class="container">
-<div class="main-area">
-<!-- IDLE -->
-<div class="idle-panel" id="panelIdle">
-  <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('camera')">摄像头</button>
-    <button class="tab-btn" onclick="switchTab('upload')">上传视频</button>
-  </div>
-  <div class="tab-content">
-    <div class="tab-pane active" id="tabCamera">
-      <p style="margin-bottom:12px;color:#aaa">输入 RTSP 地址开始实时监控</p>
-      <input type="text" id="rtspUrl" placeholder="rtsp://admin:admin123@192.168.1.108:554/...">
-      <button class="btn btn-primary" onclick="startCamera()">开始监控</button>
-    </div>
-    <div class="tab-pane" id="tabUpload">
-      <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-        <p>点击或拖拽视频文件到此处上传</p>
-        <p style="color:#666;font-size:0.8rem;margin-top:8px">支持 mp4/avi/mkv，最大 500MB</p>
-      </div>
-      <input type="file" id="fileInput" accept=".mp4,.avi,.mkv,.mov" style="display:none" onchange="uploadFile(this)">
-      <div class="progress-bar" id="uploadProgress" style="display:none"><div class="fill" id="uploadFill"></div></div>
-      <ul class="file-list" id="fileList"></ul>
-      <button class="btn btn-primary" id="btnStartVideo" disabled onclick="startVideo()">开始推理</button>
-    </div>
-  </div>
-</div>
-<!-- RUNNING -->
-<div class="running-panel" id="panelRunning">
-  <div class="video-box"><img id="streamImg" src="/stream_frame"></div>
-  <div class="stats-grid">
-    <div class="stat-card"><div class="val" id="sTotal">0</div><div class="lbl">总计数</div></div>
-    <div class="stat-card"><div class="val" id="sFps">0</div><div class="lbl">推理 FPS</div></div>
-    <div class="stat-card"><div class="val" id="sValid">0</div><div class="lbl">有效轨迹</div></div>
-    <div class="stat-card"><div class="val" id="sIds">0</div><div class="lbl">总 ID 数</div></div>
-  </div>
-  <div style="margin-top:12px;text-align:right">
-    <button class="btn btn-danger" onclick="stopInference()">停止</button>
-  </div>
-  <div class="chart-box"><canvas id="chartCanvas"></canvas></div>
-</div>
-<!-- FINISHED -->
-<div class="finished-panel" id="panelFinished">
-  <div class="result-summary">
-    <h3 style="color:#4fc3f7;margin-bottom:12px">推理完成</h3>
-    <p>总计数: <strong id="fTotal">0</strong> | 有效轨迹: <strong id="fValid">0</strong> | 总 ID: <strong id="fIds">0</strong></p>
-    <div class="dl-links">
-      <a href="/download/summary.csv">汇总 CSV</a>
-      <a href="/download/id_events.csv">ID 事件</a>
-      <a href="/download/trajectory.csv">轨迹报告</a>
-    </div>
-  </div>
-  <div style="margin-bottom:12px">
-    <label style="color:#aaa;margin-right:8px">诊断来源:</label>
-    <select id="diagSource" style="padding:6px;border-radius:4px;background:#1a1a2e;color:#eee;border:1px solid #333">
-      <option value="current">当前监控结果</option>
-    </select>
-    <button class="btn btn-success" onclick="runDiagnosis()">生成诊断报告</button>
-  </div>
-  <div class="diagnosis-box" id="diagBox" style="display:none">
-    <h3>诊断报告</h3>
-    <div id="diagContent"></div>
-    <div class="dl-links" style="margin-top:12px">
-      <a href="/download/diagnosis.json">下载 JSON</a>
-      <a href="/download/diagnosis.md">下载 Markdown</a>
-    </div>
-  </div>
-  <div style="margin-top:16px">
-    <button class="btn btn-primary" onclick="backToIdle()">返回首页</button>
-  </div>
-</div>
-</div>
-<div class="sidebar" id="sidebar">
-  <h3 style="color:#4fc3f7;margin-bottom:12px">线计数</h3>
-  <div id="lineCounters"></div>
-  <h3 style="color:#4fc3f7;margin:16px 0 8px">Agent 状态</h3>
-  <div id="agentStatus" style="font-size:0.85rem;color:#aaa"></div>
-</div>
-</div>
-<script>
-let mode='idle', selectedFile=null, chart=null, historyData=[];
-function switchTab(t){
-  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===(t==='camera'?0:1)));
-  document.getElementById('tabCamera').classList.toggle('active',t==='camera');
-  document.getElementById('tabUpload').classList.toggle('active',t==='upload');
-}
-function showPanel(m){
-  mode=m;
-  document.getElementById('panelIdle').style.display=m==='idle'?'block':'none';
-  document.getElementById('panelRunning').style.display=m==='running'?'block':'none';
-  document.getElementById('panelFinished').style.display=m==='finished'?'block':'none';
-  document.getElementById('sidebar').style.display=m==='running'?'block':'none';
-  const b=document.getElementById('badge');
-  b.className='status-badge '+(m==='idle'?'badge-idle':m==='running'?'badge-running':'badge-finished');
-  b.textContent=m==='idle'?'空闲':m==='running'?'运行中':'已完成';
-}
-function startCamera(){
-  const url=document.getElementById('rtspUrl').value.trim();
-  if(!url){alert('请输入RTSP地址');return;}
-  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:url})})
-  .then(r=>r.json()).then(d=>{if(d.ok)showPanel('running');else alert(d.error||'启动失败');});
-}
-function startVideo(){
-  if(!selectedFile){alert('请先选择视频');return;}
-  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'upload:'+selectedFile})})
-  .then(r=>r.json()).then(d=>{if(d.ok)showPanel('running');else alert(d.error||'启动失败');});
-}
-function stopInference(){
-  fetch('/api/stop',{method:'POST'}).then(()=>{});
-}
-function uploadFile(input){
-  const file=input.files[0];if(!file)return;
-  const fd=new FormData();fd.append('file',file);
-  const bar=document.getElementById('uploadProgress'),fill=document.getElementById('uploadFill');
-  bar.style.display='block';fill.style.width='0%';
-  const xhr=new XMLHttpRequest();
-  xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=(e.loaded/e.total*100)+'%';};
-  xhr.onload=()=>{bar.style.display='none';if(xhr.status===200)loadUploads();else alert('上传失败');};
-  xhr.onerror=()=>{bar.style.display='none';alert('上传出错');};
-  xhr.open('POST','/api/upload');xhr.send(fd);
-}
-function loadUploads(){
-  fetch('/api/uploads').then(r=>r.json()).then(files=>{
-    const ul=document.getElementById('fileList');ul.innerHTML='';
-    const sel=document.getElementById('diagSource');
-    while(sel.options.length>1)sel.remove(1);
-    files.forEach(f=>{
-      const li=document.createElement('li');li.textContent=f;
-      li.onclick=()=>{selectedFile=f;document.querySelectorAll('.file-list li').forEach(x=>x.classList.remove('selected'));li.classList.add('selected');document.getElementById('btnStartVideo').disabled=false;};
-      ul.appendChild(li);
-      const opt=document.createElement('option');opt.value='upload:'+f;opt.textContent='上传: '+f;sel.appendChild(opt);
-    });
-  });
-}
-function runDiagnosis(){
-  const src=document.getElementById('diagSource').value;
-  fetch('/api/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src})})
-  .then(r=>r.json()).then(d=>{
-    if(d.error){alert(d.error);return;}
-    const box=document.getElementById('diagBox');box.style.display='block';
-    let html='<table style="width:100%;border-collapse:collapse">';
-    html+='<tr><td style="padding:6px;color:#aaa">主要原因</td><td style="padding:6px">'+esc(d.primary_cause||'-')+'</td></tr>';
-    html+='<tr><td style="padding:6px;color:#aaa">置信度</td><td style="padding:6px">'+(d.confidence||'-')+'</td></tr>';
-    html+='<tr><td style="padding:6px;color:#aaa">次要原因</td><td style="padding:6px">'+(d.secondary_causes||[]).join(', ')+'</td></tr>';
-    html+='<tr><td style="padding:6px;color:#aaa">可疑窗口</td><td style="padding:6px">'+(d.suspect_windows||[]).length+'个</td></tr>';
-    if(d.recommendation)html+='<tr><td style="padding:6px;color:#aaa">建议</td><td style="padding:6px">'+esc(d.recommendation)+'</td></tr>';
-    html+='</table>';
-    document.getElementById('diagContent').innerHTML=html;
-  });
-}
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function backToIdle(){showPanel('idle');historyData=[];}
-function update(){
-  fetch('/api/stats').then(r=>r.json()).then(d=>{
-    if(d.mode==='running'&&mode!=='running')showPanel('running');
-    else if(d.mode==='finished'&&mode!=='finished'){
-      showPanel('finished');
-      document.getElementById('fTotal').textContent=d.total_count;
-      document.getElementById('fValid').textContent=d.valid_traj;
-      document.getElementById('fIds').textContent=d.total_ids;
-    }
-    if(d.mode==='running'){
-      document.getElementById('sTotal').textContent=d.total_count;
-      document.getElementById('sFps').textContent=d.fps_inference;
-      document.getElementById('sValid').textContent=d.valid_traj;
-      document.getElementById('sIds').textContent=d.total_ids;
-      document.getElementById('lineCounters').innerHTML=Object.entries(d.line_counters||{}).map(([k,v])=>'<div style="margin:4px 0">'+k+': <strong>'+v+'</strong></div>').join('');
-      document.getElementById('agentStatus').textContent='帧: '+d.frame_count+' | 源FPS: '+d.fps_source;
-      if(d.history&&d.history.length)historyData=d.history;
-      drawChart();
-    }
-  }).catch(()=>{});
-}
-function drawChart(){
-  const canvas=document.getElementById('chartCanvas');if(!canvas)return;
-  const ctx=canvas.getContext('2d'),W=canvas.parentElement.clientWidth,H=canvas.parentElement.clientHeight;
-  canvas.width=W;canvas.height=H;ctx.clearRect(0,0,W,H);
-  if(historyData.length<2)return;
-  const maxT=historyData[historyData.length-1].time,maxV=Math.max(...historyData.map(p=>p.total),1);
-  ctx.strokeStyle='#4fc3f7';ctx.lineWidth=2;ctx.beginPath();
-  historyData.forEach((p,i)=>{const x=p.time/maxT*(W-20)+10,y=H-10-p.total/maxV*(H-20);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
-  ctx.stroke();
-}
-let refreshImg;
-function refreshStream(){
-  const img=document.getElementById('streamImg');
-  if(mode==='running')img.src='/stream_frame?t='+Date.now();
-}
-setInterval(update,1500);
-setInterval(refreshStream,200);
-document.addEventListener('DOMContentLoaded',()=>{loadUploads();update();});
-const dz=document.getElementById('dropZone');
-dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='#4fc3f7';});
-dz.addEventListener('dragleave',()=>{dz.style.borderColor='#333';});
-dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='#333';const f=e.dataTransfer.files[0];if(f){document.getElementById('fileInput').files=e.dataTransfer.files;uploadFile(document.getElementById('fileInput'));}});
-</script>
-</body>
-</html>"""
-# ── END HTML (JS follows) ──
-# ── HTTP Handler ─────────────────────────────────────────────
+def run_diagnosis_for_run(run_id):
+    with app_state['lock']:
+        records = app_state['inference_history']
+    record = next((r for r in records if r['id'] == run_id), None)
+    if not record:
+        return None
+    result_dir = Path(record['result_dir'])
+    if not result_dir.exists():
+        return {"error": "结果目录不存在"}
+    agent = app_state.get('agent')
+    if not agent:
+        agent = PigCountingAgent(log_dir=server_config['output_dir'])
+    video_name = record.get('source', 'unknown')
+    try:
+        diagnosis = agent.analyze(result_dir, video_name)
+        agent.write_reports(result_dir, diagnosis)
+        with app_state['lock']:
+            for r in app_state['inference_history']:
+                if r['id'] == run_id:
+                    r['diagnosis'] = diagnosis
+                    break
+        save_inference_history()
+        return diagnosis
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── HTML Page (based on original working frontend) ───────────
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.parse
 import mimetypes
 
+HTML_PAGE = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pig Counter - Live Monitor</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: #0f172a; color: #e2e8f0; overflow: hidden; }
+.header { background: #1e293b; padding: 8px 20px; display: flex;
+           align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; }
+.header h1 { font-size: 1.1rem; color: #38bdf8; }
+.header .status { font-size: 0.8rem; }
+.status .live { color: #22c55e; font-weight: bold; }
+.status .idle-tag { color: #94a3b8; }
+.status .done-tag { color: #fb923c; font-weight: bold; }
+.container { display: grid; grid-template-columns: 1fr 240px 300px; gap: 10px;
+             padding: 10px; height: calc(100vh - 44px); }
+.video-panel { position: relative; background: #000; border-radius: 8px; overflow: hidden; min-height: 0; }
+.video-panel img { width: 100%; height: 100%; object-fit: contain; }
+.video-panel .placeholder { display: flex; align-items: center; justify-content: center;
+                            height: 100%; color: #475569; font-size: 1.1rem; }
+.mid-panel { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.right-panel { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.card { background: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155; }
+.card h3 { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase;
+            letter-spacing: 0.05em; margin-bottom: 8px; }
+.big-number { font-size: 2.4rem; font-weight: 700; color: #22c55e; text-align: center; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.stat { text-align: center; padding: 6px; background: #0f172a; border-radius: 6px; }
+.stat .label { font-size: 0.7rem; color: #64748b; }
+.stat .value { font-size: 0.95rem; font-weight: 600; margin-top: 2px; }
+.line-stats { display: flex; flex-direction: column; gap: 4px; }
+.line-row { display: flex; justify-content: space-between; align-items: center;
+            padding: 4px 8px; background: #0f172a; border-radius: 4px; }
+.line-row .name { font-size: 0.8rem; }
+.line-row .count { font-size: 0.9rem; font-weight: 600; }
+.line0 .name { color: #fb923c; }
+.line1 .name, .line2 .name { color: #22d3ee; }
+.btn { display: inline-block; padding: 6px 12px; border-radius: 6px; border: none;
+       cursor: pointer; font-size: 0.78rem; font-weight: 500; text-decoration: none; color: white; }
+.btn-primary { background: #3b82f6; }
+.btn-primary:hover { background: #2563eb; }
+.btn-danger { background: #ef4444; }
+.btn-success { background: #22c55e; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+canvas { width: 100%; height: 80px; }
+input[type=text] { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #334155;
+                   background: #0f172a; color: #e2e8f0; margin-bottom: 8px; font-size: 0.82rem; }
+.upload-zone { border: 2px dashed #334155; border-radius: 8px; padding: 16px;
+               text-align: center; margin-bottom: 8px; cursor: pointer; font-size: 0.82rem; }
+.upload-zone:hover { border-color: #38bdf8; }
+.file-list { list-style: none; max-height: 100px; overflow-y: auto; margin-bottom: 8px; }
+.file-list li { padding: 5px 8px; background: #0f172a; margin-bottom: 3px; border-radius: 4px;
+                cursor: pointer; border: 1px solid transparent; font-size: 0.82rem; }
+.file-list li.selected { border-color: #38bdf8; background: #1e3a5f; }
+.file-list li:hover { background: #1e293b; }
+.progress-bar { height: 3px; background: #334155; border-radius: 2px; margin: 6px 0; display: none; }
+.progress-bar .fill { height: 100%; background: #38bdf8; border-radius: 2px; transition: width 0.3s; }
+.hist-item { padding: 8px 10px; background: #0f172a; border-radius: 6px; margin-bottom: 5px;
+             border: 1px solid #334155; }
+.hist-item .hist-header { display: flex; justify-content: space-between; align-items: center; }
+.hist-item .hist-name { font-size: 0.82rem; font-weight: 500; }
+.hist-item .hist-time { font-size: 0.7rem; color: #64748b; }
+.hist-item .hist-stats { font-size: 0.75rem; color: #94a3b8; margin-top: 3px; }
+.hist-item .hist-actions { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+.btn-sm { padding: 3px 8px; font-size: 0.7rem; border-radius: 4px; }
+.tabs { display: flex; gap: 2px; margin-bottom: 8px; }
+.tab-btn { padding: 6px 12px; background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+           cursor: pointer; border-radius: 6px 6px 0 0; font-size: 0.8rem; }
+.tab-btn.active { background: #334155; color: #38bdf8; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+@media (max-width: 1100px) { .container { grid-template-columns: 1fr 300px; }
+  .mid-panel { display: none; } }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>Pig Counter - NPU Live Monitor</h1>
+    <div class="status">
+        <span id="status-dot" class="idle-tag">IDLE</span>
+        <span id="info-src"></span>
+    </div>
+</div>
+<div class="container">
+    <!-- Left: Video -->
+    <div class="video-panel" id="videoPanel">
+        <img id="stream" src="" alt="Video Stream" style="display:none">
+        <div class="placeholder" id="videoPlaceholder">等待推理开始...</div>
+    </div>
+    <!-- Middle: Stats -->
+    <div class="mid-panel">
+        <div class="card">
+            <h3>Total Count</h3>
+            <div class="big-number" id="total">0</div>
+        </div>
+        <div class="card">
+            <h3>Line Crossings</h3>
+            <div class="line-stats">
+                <div class="line-row line0"><span class="name">Line 0</span><span class="count" id="line0">0</span></div>
+                <div class="line-row line1"><span class="name">Line 1</span><span class="count" id="line1">0</span></div>
+                <div class="line-row line2"><span class="name">Line 2</span><span class="count" id="line2">0</span></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Statistics</h3>
+            <div class="stat-grid">
+                <div class="stat"><div class="label">FPS</div><div class="value" id="fps">0</div></div>
+                <div class="stat"><div class="label">IDs</div><div class="value" id="ids">0</div></div>
+                <div class="stat"><div class="label">Valid</div><div class="value" id="valid">0</div></div>
+                <div class="stat"><div class="label">Frames</div><div class="value" id="frames">0</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Agent</h3>
+            <div class="stat-grid">
+                <div class="stat"><div class="label">Status</div><div class="value" id="agent-status">BOOT</div></div>
+                <div class="stat"><div class="label">Health</div><div class="value" id="agent-health">100</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Trend</h3>
+            <canvas id="chart"></canvas>
+        </div>
+        <div class="card">
+            <div class="actions">
+                <button class="btn btn-danger" onclick="stopInference()">停止</button>
+                <button class="btn btn-danger" onclick="resetCount()">重置</button>
+                <a class="btn btn-primary" href="/download/csv" download>CSV</a>
+            </div>
+        </div>
+    </div>
+    <!-- Right: Controls + History -->
+    <div class="right-panel">
+        <div class="card">
+            <h3>数据源</h3>
+            <div class="tabs">
+                <button class="tab-btn" onclick="switchTab('camera')">摄像头</button>
+                <button class="tab-btn active" onclick="switchTab('upload')">上传视频</button>
+            </div>
+            <div class="tab-pane" id="tabCamera">
+                <input type="text" id="rtspUrl" placeholder="rtsp://...">
+                <button class="btn btn-primary" onclick="startCamera()">开始监控</button>
+            </div>
+            <div class="tab-pane active" id="tabUpload">
+                <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+                    <p>点击上传视频</p>
+                    <p style="color:#64748b;font-size:0.72rem;margin-top:4px">mp4/avi/mkv, max 500MB</p>
+                </div>
+                <input type="file" id="fileInput" accept=".mp4,.avi,.mkv,.mov" style="display:none" onchange="uploadFile(this)">
+                <div class="progress-bar" id="uploadProgress"><div class="fill" id="uploadFill"></div></div>
+                <ul class="file-list" id="fileList"></ul>
+                <button class="btn btn-primary" id="btnStartVideo" disabled onclick="startVideo()">开始推理</button>
+            </div>
+        </div>
+        <div class="card">
+            <h3>历史推理记录</h3>
+            <div id="historyList" style="max-height:calc(100vh - 380px);overflow-y:auto">
+                <p style="color:#64748b;font-size:0.82rem">暂无历史记录</p>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+let mode='idle', selectedFile=null;
+function switchTab(t){
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===(t==='camera'?0:1)));
+  document.getElementById('tabCamera').classList.toggle('active',t==='camera');
+  document.getElementById('tabUpload').classList.toggle('active',t==='upload');
+}
+function startCamera(){
+  const url=document.getElementById('rtspUrl').value.trim();
+  if(!url){alert('请输入RTSP地址');return;}
+  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:url})})
+  .then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'启动失败');});
+}
+function startVideo(){
+  if(!selectedFile){alert('请先选择视频');return;}
+  fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'upload:'+selectedFile})})
+  .then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'启动失败');});
+}
+function stopInference(){ fetch('/api/stop',{method:'POST'}); }
+function resetCount(){ fetch('/api/reset',{method:'POST'}); }
+function uploadFile(input){
+  const file=input.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  const bar=document.getElementById('uploadProgress'),fill=document.getElementById('uploadFill');
+  bar.style.display='block'; fill.style.width='0%';
+  const xhr=new XMLHttpRequest();
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=(e.loaded/e.total*100)+'%';};
+  xhr.onload=()=>{bar.style.display='none';if(xhr.status===200)loadUploads();else alert('上传失败');};
+  xhr.onerror=()=>{bar.style.display='none';alert('上传出错');};
+  xhr.open('POST','/api/upload'); xhr.send(fd);
+}
+function loadUploads(){
+  fetch('/api/uploads').then(r=>r.json()).then(files=>{
+    const ul=document.getElementById('fileList'); ul.innerHTML='';
+    files.forEach(f=>{
+      const li=document.createElement('li'); li.textContent=f;
+      li.onclick=()=>{selectedFile=f;document.querySelectorAll('.file-list li').forEach(x=>x.classList.remove('selected'));li.classList.add('selected');document.getElementById('btnStartVideo').disabled=false;};
+      ul.appendChild(li);
+    });
+  });
+}
+function deleteRun(runId){
+  if(!confirm('确定删除此记录？'))return;
+  fetch('/api/history/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})})
+  .then(r=>r.json()).then(d=>{if(d.ok)loadHistory();else alert(d.error||'删除失败');});
+}
+function runDiagnosis(runId){
+  const body = runId ? JSON.stringify({run_id:runId}) : JSON.stringify({});
+  fetch('/api/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},body:body})
+  .then(r=>r.json()).then(d=>{
+    if(d.error){alert(d.error);return;}
+    loadHistory();
+  });
+}
+function loadHistory(){
+  fetch('/api/history').then(r=>r.json()).then(records=>{
+    const el=document.getElementById('historyList');
+    if(!records||!records.length){el.innerHTML='<p style="color:#64748b;font-size:0.82rem">暂无历史记录</p>';return;}
+    el.innerHTML=records.map(r=>{
+      let acts='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/summary.csv" download>汇总</a>';
+      acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/trajectory.csv" download>轨迹</a>';
+      if(r.diagnosis){
+        acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/diagnosis.json" download>诊断</a>';
+      } else {
+        acts+='<button class="btn btn-success btn-sm" onclick="runDiagnosis(&quot;'+r.id+'&quot;)">诊断</button>';
+      }
+      acts+='<button class="btn btn-danger btn-sm" onclick="deleteRun(&quot;'+r.id+'&quot;)">删除</button>';
+      const dur=r.duration_s>=60?Math.round(r.duration_s/60)+'min':Math.round(r.duration_s)+'s';
+      return '<div class="hist-item"><div class="hist-header"><span class="hist-name">'+r.source+'</span><span class="hist-time">'+dur+'</span></div>'
+        +'<div class="hist-stats">计数:'+r.total_count+' 有效:'+r.valid_traj+' ID:'+r.total_ids+'</div>'
+        +'<div class="hist-actions">'+acts+'</div></div>';
+    }).join('');
+  });
+}
+function update(){
+  fetch('/api/stats').then(r=>r.json()).then(d=>{
+    const dot=document.getElementById('status-dot');
+    const img=document.getElementById('stream');
+    const ph=document.getElementById('videoPlaceholder');
+    if(d.mode!==mode){
+      mode=d.mode;
+      if(d.mode==='running'){
+        dot.className='live'; dot.textContent='LIVE';
+        img.src='/stream?t='+Date.now(); img.style.display=''; ph.style.display='none';
+      } else if(d.mode==='finished'){
+        dot.className='done-tag'; dot.textContent='FINISHED';
+        img.style.display='none'; ph.style.display='flex'; ph.textContent='推理完成';
+        loadHistory();
+      } else {
+        dot.className='idle-tag'; dot.textContent='IDLE';
+        img.style.display='none'; ph.style.display='flex'; ph.textContent='等待推理开始...';
+      }
+    }
+    if(d.mode==='running'){
+      document.getElementById('total').textContent=d.total_count;
+      document.getElementById('line0').textContent=d.line0;
+      document.getElementById('line1').textContent=d.line1;
+      document.getElementById('line2').textContent=d.line2;
+      document.getElementById('fps').textContent=d.fps_inference;
+      document.getElementById('ids').textContent=d.total_ids;
+      document.getElementById('valid').textContent=d.valid_traj;
+      document.getElementById('frames').textContent=d.frame_count;
+      document.getElementById('agent-status').textContent=d.agent_status;
+      document.getElementById('agent-health').textContent=d.health_score;
+      document.getElementById('info-src').textContent=d.resolution+' | '+d.fps_source+'fps';
+      drawChart(d.history);
+    }
+  }).catch(()=>{});
+}
+function drawChart(history){
+  const c=document.getElementById('chart'); if(!c)return;
+  const ctx=c.getContext('2d');
+  c.width=c.offsetWidth*2; c.height=c.offsetHeight*2; ctx.scale(2,2);
+  const W=c.offsetWidth, H=c.offsetHeight; ctx.clearRect(0,0,W,H);
+  if(!history||history.length<2)return;
+  const maxT=Math.max(...history.map(h=>h.total),1);
+  ctx.strokeStyle='#22c55e'; ctx.lineWidth=1.5; ctx.beginPath();
+  history.forEach((h,i)=>{const x=(i/(history.length-1))*W;const y=H-(h.total/maxT)*(H-10)-5;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.stroke();
+}
+setInterval(update,800);
+document.addEventListener('DOMContentLoaded',()=>{loadUploads();loadHistory();update();});
+</script>
+</body>
+</html>'''
 
+
+# ── HTTP Handler ─────────────────────────────────────────────
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -732,18 +832,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def _json_response(self, data, status=200):
+    def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _html_response(self, html):
-        body = html.encode('utf-8')
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -752,56 +844,90 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
 
         if path == '/' or path == '/index.html':
-            self._html_response(HTML_PAGE)
+            body = HTML_PAGE.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == '/stream':
+            self.send_response(200)
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            try:
+                idle_count = 0
+                while True:
+                    with app_state['lock']:
+                        jpeg = app_state.get('frame_jpeg')
+                        running = app_state.get('running', False)
+                    if not running:
+                        break
+                    if jpeg:
+                        self.wfile.write(b'--frame\r\n')
+                        self.wfile.write(b'Content-Type: image/jpeg\r\nContent-Length: '
+                                         + str(len(jpeg)).encode() + b'\r\n\r\n')
+                        self.wfile.write(jpeg)
+                        self.wfile.write(b'\r\n')
+                        self.wfile.flush()
+                        idle_count = 0
+                    else:
+                        idle_count += 1
+                        if idle_count > 50:
+                            break
+                    time.sleep(0.08)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
         elif path == '/api/stats':
             with app_state['lock']:
                 data = {
                     'mode': app_state['mode'],
+                    'total_count': app_state['total_count'],
+                    'line0': app_state['line_counters'].get('line0', 0),
+                    'line1': app_state['line_counters'].get('line1', 0),
+                    'line2': app_state['line_counters'].get('line2', 0),
                     'fps_inference': app_state['fps_inference'],
                     'fps_source': app_state['fps_source'],
                     'frame_count': app_state['frame_count'],
-                    'line_counters': app_state['line_counters'],
-                    'total_count': app_state['total_count'],
                     'valid_traj': app_state['valid_traj'],
                     'total_ids': app_state['total_ids'],
-                    'source': app_state['source'],
                     'resolution': app_state['resolution'],
-                    'history': app_state['history'][-200:],
+                    'history': app_state['history'][-60:],
+                    'agent_status': app_state.get('agent_status', 'BOOT'),
+                    'health_score': app_state.get('health_score', 100),
+                    'anomaly_count': app_state.get('anomaly_count', 0),
+                    'recovery_count': app_state.get('recovery_count', 0),
+                    'agent_events': app_state.get('agent_events', []),
                 }
-            self._json_response(data)
-
-        elif path == '/stream_frame':
-            with app_state['lock']:
-                jpeg = app_state.get('frame_jpeg')
-            if jpeg:
-                self.send_response(200)
-                self.send_header('Content-Type', 'image/jpeg')
-                self.send_header('Content-Length', str(len(jpeg)))
-                self.send_header('Cache-Control', 'no-cache')
-                self.end_headers()
-                self.wfile.write(jpeg)
-            else:
-                self.send_response(204)
-                self.end_headers()
+            self._json(data)
 
         elif path == '/api/uploads':
             upload_dir = Path(server_config['output_dir']) / 'uploads'
             files = []
             if upload_dir.exists():
                 files = sorted([f.name for f in upload_dir.iterdir() if f.is_file()])
-            self._json_response(files)
+            self._json(files)
+
+        elif path == '/api/history':
+            with app_state['lock']:
+                hist = list(app_state['inference_history'])
+            self._json(hist)
 
         elif path == '/api/diagnosis':
             with app_state['lock']:
                 diag = app_state.get('diagnosis')
-            if diag:
-                self._json_response(diag)
-            else:
-                self._json_response({'error': '暂无诊断报告'}, 404)
+            self._json(diag if diag else {'error': '暂无诊断报告'}, 200 if diag else 404)
 
         elif path.startswith('/download/'):
-            fpath = resolve_download_path(path)
+            parts = path[len('/download/'):].split('/')
+            if len(parts) == 2:
+                run_id, key = parts
+                fpath = self._resolve_run_download(run_id, key)
+            else:
+                key = parts[0]
+                fpath = self._resolve_download(key)
             if fpath and fpath.exists():
                 self.send_response(200)
                 ct = mimetypes.guess_type(str(fpath))[0] or 'application/octet-stream'
@@ -818,6 +944,53 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def _resolve_download(self, key):
+        filename = RESULT_FILES.get(key)
+        if key == 'csv':
+            filename = RESULT_FILES['summary.csv']
+        elif key == 'diagnosis.json':
+            d = app_state.get('completed_result_dir')
+            if d:
+                p = Path(d) / "ByteTrack_diagnosis.json"
+                return p if p.exists() else None
+            return None
+        elif key == 'diagnosis.md':
+            d = app_state.get('completed_result_dir')
+            if d:
+                p = Path(d) / "ByteTrack_diagnosis.md"
+                return p if p.exists() else None
+            return None
+        if not filename:
+            return None
+        for base_key in ('completed_result_dir', 'current_result_dir'):
+            d = app_state.get(base_key)
+            if d:
+                candidate = Path(d) / filename
+                if candidate.exists():
+                    return candidate
+        return None
+
+    def _resolve_run_download(self, run_id, key):
+        with app_state['lock']:
+            records = app_state['inference_history']
+        record = next((r for r in records if r['id'] == run_id), None)
+        if not record:
+            return None
+        result_dir = Path(record['result_dir'])
+        if key == 'summary.csv':
+            filename = RESULT_FILES['summary.csv']
+        elif key == 'trajectory.csv':
+            filename = RESULT_FILES['trajectory.csv']
+        elif key == 'diagnosis.json':
+            return result_dir / "ByteTrack_diagnosis.json"
+        elif key == 'diagnosis.md':
+            return result_dir / "ByteTrack_diagnosis.md"
+        else:
+            filename = RESULT_FILES.get(key)
+        if not filename:
+            return None
+        return result_dir / filename
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
 
@@ -830,51 +1003,86 @@ class Handler(BaseHTTPRequestHandler):
                 upload_dir = Path(server_config['output_dir']) / 'uploads'
                 filepath = upload_dir / filename
                 if not filepath.exists():
-                    self._json_response({'ok': False, 'error': '文件不存在'}, 400)
+                    self._json({'ok': False, 'error': '文件不存在'}, 400)
                     return
                 source = str(filepath)
             if not source:
-                self._json_response({'ok': False, 'error': '未指定数据源'}, 400)
+                self._json({'ok': False, 'error': '未指定数据源'}, 400)
                 return
             ok = start_inference(source)
-            if ok:
-                self._json_response({'ok': True})
-            else:
-                self._json_response({'ok': False, 'error': '已有推理在运行'}, 409)
+            self._json({'ok': True} if ok else {'ok': False, 'error': '已有推理在运行'}, 200 if ok else 409)
 
         elif path == '/api/stop':
             stop_inference()
-            self._json_response({'ok': True})
+            self._json({'ok': True})
+
+        elif path == '/api/reset':
+            with app_state['lock']:
+                app_state['reset_flag'] = True
+            self._json({'ok': True})
 
         elif path == '/api/upload':
             content_type = self.headers.get('Content-Type', '')
             if 'multipart/form-data' not in content_type:
-                self._json_response({'error': '需要 multipart/form-data'}, 400)
+                self._json({'error': '需要 multipart/form-data'}, 400)
                 return
             length = int(self.headers.get('Content-Length', 0))
             if length > MAX_UPLOAD_SIZE:
-                self._json_response({'error': '文件过大'}, 413)
+                self._json({'error': '文件过大'}, 413)
                 return
             boundary = content_type.split('boundary=')[1].encode()
             raw = self.rfile.read(length)
             filename, filedata = self._parse_multipart(raw, boundary)
             if not filename:
-                self._json_response({'error': '未找到文件'}, 400)
+                self._json({'error': '未找到文件'}, 400)
                 return
             upload_dir = Path(server_config['output_dir']) / 'uploads'
             upload_dir.mkdir(parents=True, exist_ok=True)
             dest = upload_dir / Path(filename).name
             dest.write_bytes(filedata)
-            self._json_response({'ok': True, 'filename': dest.name})
+            self._json({'ok': True, 'filename': dest.name})
 
         elif path == '/api/diagnose':
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = run_diagnosis()
-            if result:
-                self._json_response(result)
+            run_id = body.get('run_id')
+            if run_id:
+                result = run_diagnosis_for_run(run_id)
             else:
-                self._json_response({'error': '无法生成诊断报告，请先完成一次推理'}, 400)
+                result = run_diagnosis()
+            if result:
+                self._json(result)
+            else:
+                self._json({'error': '无法生成诊断报告，请先完成一次推理'}, 400)
+
+        elif path == '/api/history/delete':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            run_id = body.get('run_id', '')
+            if not run_id:
+                self._json({'ok': False, 'error': '缺少run_id'}, 400)
+                return
+            with app_state['lock']:
+                before = len(app_state['inference_history'])
+                app_state['inference_history'] = [r for r in app_state['inference_history'] if r['id'] != run_id]
+                removed = len(app_state['inference_history']) < before
+            if removed:
+                save_inference_history()
+                self._json({'ok': True})
+            else:
+                self._json({'ok': False, 'error': '记录不存在'}, 404)
+
+        elif path == '/api/manual_review':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            subject = body.get('subject', '').strip()
+            decision = body.get('decision', '').strip()
+            note = body.get('note', '').strip()
+            if not subject or not decision:
+                self._json({'ok': False, 'error': 'subject and decision required'}, 400)
+                return
+            entry = append_manual_review(subject, decision, note)
+            self._json({'ok': True, 'entry': entry})
         else:
             self.send_response(404)
             self.end_headers()
@@ -921,6 +1129,7 @@ def main():
 
     Path(args.output).mkdir(parents=True, exist_ok=True)
     review_store["path"] = str(Path(args.output) / "manual_reviews.jsonl")
+    load_inference_history()
 
     source = args.rtsp or args.video
     if source:
@@ -928,7 +1137,7 @@ def main():
 
     server = ThreadedHTTPServer(('0.0.0.0', args.port), Handler)
     print(f"[WEB] http://0.0.0.0:{args.port}")
-    print(f"[MODE] {'Auto-started: ' + source if source else 'Idle — waiting for frontend control'}")
+    print(f"[MODE] {'Auto-started: ' + source if source else 'Idle — use web UI to start'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
