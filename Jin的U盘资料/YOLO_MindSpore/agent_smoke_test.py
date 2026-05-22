@@ -167,10 +167,46 @@ def test_diagnosis_agent():
     print("OK diagnosis_agent")
 
 
+def test_unified_agent():
+    """Test that a single PigCountingAgent instance can do all three jobs."""
+    from pig_counting_agent import PigCountingAgent
+
+    agent = PigCountingAgent(
+        registry_path=ROOT / "review_registry.json",
+        tracker_name="ByteTrack",
+        log_dir=None,
+        stale_frame_seconds=0.01,
+        reconnect_failure_threshold=2,
+    )
+
+    # Review capability
+    result = agent.assess("17-37头.mp4", 37, 32)
+    assert result["paper_actual"] == 31
+    assert result["paper_error"] == 1
+
+    # Ops monitoring capability
+    agent.note_stream_started("rtsp://test")
+    agent.note_frame(frame_idx=1, infer_fps=10.0, total_count=5, valid_traj=5, total_ids=5)
+    assert agent.snapshot()["status"] == "HEALTHY"
+    agent.note_waiting_for_frame(wait_seconds=0.02, failure_streak=2)
+    assert agent.snapshot()["status"] == "RECOVERING"
+    assert agent.consume_actions()["reconnect"] is True
+
+    # Diagnosis capability (if data available)
+    out_dir = ROOT.parent.parent / "output" / "batch_rerun_group4_review" / "17-37头"
+    if out_dir.exists():
+        diagnosis = agent.analyze(out_dir, "17-37头.mp4", actual=37, paper_actual=31,
+                                  total_line=32, valid_traj=30)
+        assert diagnosis["primary_cause"] == "标签定义与统计方向不一致"
+
+    print("OK unified_agent")
+
+
 def main():
     test_review_agent()
     test_diagnosis_agent()
     test_autonomous_agent()
+    test_unified_agent()
     test_manual_review_store()
     test_generated_review_csv()
     print("ALL AGENT SMOKE TESTS PASSED")

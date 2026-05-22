@@ -28,7 +28,9 @@ from npu_detector import NPUDetector
 from trackers.byte_tracker.byte_tracker import BYTETracker
 from types import SimpleNamespace
 from track_and_count_npu import ZoneAnalyzer
-from autonomous_agent import AutonomousOpsAgent
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pig_counting_agent import PigCountingAgent
 
 # ── Globals ──────────────────────────────────────────────────
 app_state = {
@@ -205,7 +207,7 @@ def grabber_loop():
 # ── Inference thread ─────────────────────────────────────────
 def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
     detector = NPUDetector(om_path, conf_thres=conf_thres)
-    agent = AutonomousOpsAgent(log_dir=output_root)
+    agent = PigCountingAgent(log_dir=output_root)
     app_state['agent'] = agent
 
     if source.startswith('rtsp://') or source.startswith('http://'):
