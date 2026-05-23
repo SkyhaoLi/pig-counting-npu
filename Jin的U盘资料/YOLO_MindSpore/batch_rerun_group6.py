@@ -5,7 +5,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 TRACK_SCRIPT = SCRIPT_DIR / 'track_and_count.py'
 MODEL_PATH = Path('E:/Jin的U盘资料/YOLO/runs/detect/train/weights/best.pt')
-VIDEO_DIR = SCRIPT_DIR / '数据集/六'
+VIDEO_DIR = SCRIPT_DIR / 'data' / 'datasets' / 'group6'
 OUTPUT_BASE = Path('C:/Users/Skyha/Desktop/pig_couter/output/batch_rerun_group6')
 PYTHON = r'C:\Users\Skyha\.conda\envs\ai-study\python.exe'
 

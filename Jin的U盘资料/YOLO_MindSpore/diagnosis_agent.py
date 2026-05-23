@@ -3,11 +3,4 @@
 
 from __future__ import annotations
 
-from pig_counting_agent import PigCountingAgent
-
-
-class DiagnosisAgent(PigCountingAgent):
-    """Backward-compatible alias for the diagnosis subset of PigCountingAgent."""
-
-    def __init__(self, tracker_name="ByteTrack"):
-        super().__init__(registry_path=None, tracker_name=tracker_name)
+from legacy.diagnosis_agent import DiagnosisAgent
