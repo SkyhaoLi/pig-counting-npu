@@ -10,8 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from legacy.diagnosis_agent import DiagnosisAgent
-from legacy.review_agent import HumanReviewAgent
+from diagnosis_agent import DiagnosisAgent
+from review_agent import HumanReviewAgent
 
 
 SCRIPT_DIR = Path(__file__).parent
@@ -23,9 +23,9 @@ DEFAULT_PYTHON = Path(r"C:\Users\Skyha\.conda\envs\pig_count\python.exe")
 REVIEW_REGISTRY = SCRIPT_DIR / "review_registry.json"
 
 GROUP_TO_VIDEO_DIR = {
-    "4": SCRIPT_DIR / "data" / "datasets" / "group4",
-    "5": SCRIPT_DIR / "data" / "datasets" / "group5",
-    "6": SCRIPT_DIR / "data" / "datasets" / "group6",
+    "4": SCRIPT_DIR / "数据集" / "四",
+    "5": SCRIPT_DIR / "数据集" / "五",
+    "6": SCRIPT_DIR / "数据集" / "六",
 }
 
 GROUP_TO_OUTPUT_DIR = {

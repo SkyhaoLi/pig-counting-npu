@@ -3,4 +3,13 @@
 
 from __future__ import annotations
 
-from legacy.review_agent import HumanReviewAgent
+from pathlib import Path
+
+from pig_counting_agent import PigCountingAgent
+
+
+class HumanReviewAgent(PigCountingAgent):
+    """Backward-compatible alias for the review subset of PigCountingAgent."""
+
+    def __init__(self, registry_path):
+        super().__init__(registry_path=registry_path)

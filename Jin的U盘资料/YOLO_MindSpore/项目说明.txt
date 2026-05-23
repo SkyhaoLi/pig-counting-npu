@@ -1,1 +1,91 @@
-猪只智能计数系统说明已迁移到 docs/项目说明.txt。
+================================================================================
+        猪只智能计数系统 —— 项目文件说明
+================================================================================
+
+一、根目录脚本
+──────────────
+
+  track_and_count.py
+    PC端计数主脚本。PyTorch YOLO检测 + ByteTrack追踪 + 三线穿越计数。
+    输出标注视频、ID事件CSV、轨迹报告CSV、状态变化TXT、计数汇总CSV。
+    用法: python track_and_count.py --video_path xx.mp4 --model_path best.pt --output_dir ./out
+
+  npu_detector.py
+    NPU推理封装类(ACL接口)。加载OM模型, 完成预处理/推理/NMS后处理。
+    根目录这份供本地参考, deploy_atlas/里有板子上实际运行的副本。
+
+  deploy_to_atlas.py
+    自动化部署脚本。通过SSH/SFTP将deploy_atlas/目录和视频数据集上传到
+    Atlas 200I DK A2板子(192.168.137.100)。
+    用法: python deploy_to_atlas.py
+
+  batch_rerun_group4.py
+  batch_rerun_group5.py
+  batch_rerun_group6.py
+    PC端批量处理脚本, 分别对应数据集第四/五/六组。
+    调用track_and_count.py逐个处理视频, 汇总结果到batch_results.csv。
+    用法: python batch_rerun_group4.py
+
+
+二、trackers/ —— ByteTrack追踪器
+─────────────────────────────────
+
+  byte_tracker/
+    ├── byte_tracker.py       ByteTrack主体(BYTETracker类, STrack类)
+    ├── basetrack.py          轨迹基类(TrackState状态机)
+    ├── kalman_filter.py      卡尔曼滤波(预测+更新)
+    ├── matching.py           IoU计算、匈牙利匹配、分数融合
+    ├── byte_tracker_public.py  公开版追踪器(未使用, 可选保留)
+    └── __init__.py
+
+  这是ByteTrack论文的完整实现, PC端和NPU端共用。
+
+
+三、deploy_atlas/ —— Atlas板子部署包
+─────────────────────────────────────
+
+  track_and_count_npu.py
+    NPU版计数主脚本。逻辑与track_and_count.py一致,
+    区别是用NPUDetector替代PyTorch YOLO做检测。
+
+  npu_detector.py
+    NPU检测器(板子上实际运行的版本)。
+    ACL加载OM模型, 含手动NMS后处理。
+
+  batch_run_npu.py
+    NPU端批量处理脚本。遍历视频目录, 逐个调用track_and_count_npu.py。
+
+  web_monitor.py
+    实时网页监控系统。RTSP摄像头输入 + NPU推理 + MJPEG网页流。
+    浏览器访问http://192.168.137.100:8080查看实时画面和计数。
+    支持重置计数、下载CSV、趋势图。
+
+  trackers/
+    ByteTrack追踪器副本(与根目录trackers/内容相同, 部署到板子上用)。
+
+
+四、数据集/ —— 视频数据
+────────────────────────
+
+  一/ 二/ 三/    早期数据集(已跑完, 留作参考)
+  四/            第四组: 23个视频, 文件名含真实头数(如"1-12头.mp4")
+  五/            第五组: 1个长视频
+  六/            第六组: 3个视频(含长视频拼接版)
+
+
+五、运行环境
+────────────
+
+  PC端:
+    Python: C:\Users\Skyha\.conda\envs\ai-study\python.exe
+    模型: E:/Jin的U盘资料/YOLO/runs/detect/train/weights/best.pt
+    依赖: ultralytics, opencv-python, numpy, tqdm
+
+  Atlas板端:
+    地址: 192.168.137.100 (HwHiAiUser / Mind@123)
+    模型: ~/pig_counting/models/yolov8n_pig_fp16.om
+    环境: CANN 7.0.RC1, Python 3.10.6, opencv-python, numpy
+
+  摄像头:
+    IP: 192.168.2.103 (admin / admin123@)
+    RTSP: rtsp://admin:admin123@@192.168.2.103:554/cam/realmonitor?channel=1&subtype=1

@@ -25,7 +25,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # 导入ByteTrack追踪器（使用原项目完整实现）
-from app.tracking.byte_tracker.byte_tracker import BYTETracker
+from trackers.byte_tracker.byte_tracker import BYTETracker
 from types import SimpleNamespace
 
 # 导入YOLO

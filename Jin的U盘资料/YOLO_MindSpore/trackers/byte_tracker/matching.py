@@ -34,7 +34,7 @@ def bbox_ious(atlbrs, btlbrs):
     iou = np.where(union > 0, intersection / union, 0)
     
     return iou
-from . import kalman_filter
+from trackers.byte_tracker import kalman_filter
 import time
 
 def merge_matches(m1, m2, shape):
