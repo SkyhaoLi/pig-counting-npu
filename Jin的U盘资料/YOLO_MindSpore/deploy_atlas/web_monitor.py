@@ -306,6 +306,8 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
         gt.start()
 
     frame_idx = 0
+    skip_interval = 2  # process every Nth frame (1=all, 2=skip one, 3=skip two)
+    active_tracks = []
     t_last = time.time()
     fps_counter = 0
     last_export = 0.0
@@ -371,18 +373,19 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
                 snapshot_completed_results(current_result_dir, completed_result_dir)
                 break
 
-        raw_dets = detector.detect(frame)
-        detections = [det[:5] for det in raw_dets if not is_blue_object(frame, det[:5])]
-        dets = np.array(detections) if detections else np.empty((0, 5))
-        tracks = tracker.update(dets, (height, width), (height, width))
-        active_tracks = [(int(t.track_id), t.tlbr) for t in tracks if t.is_activated]
+        if frame_idx % skip_interval == 0:
+            raw_dets = detector.detect(frame)
+            detections = [det[:5] for det in raw_dets if not is_blue_object(frame, det[:5])]
+            dets = np.array(detections) if detections else np.empty((0, 5))
+            tracks = tracker.update(dets, (height, width), (height, width))
+            active_tracks = [(int(t.track_id), t.tlbr) for t in tracks if t.is_activated]
 
-        for tid, bbox in active_tracks:
-            cx = (bbox[0] + bbox[2]) / 2
-            cy = (bbox[1] + bbox[3]) / 2
-            bw = bbox[2] - bbox[0]
-            bh = bbox[3] - bbox[1]
-            analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None)
+            for tid, bbox in active_tracks:
+                cx = (bbox[0] + bbox[2]) / 2
+                cy = (bbox[1] + bbox[3]) / 2
+                bw = bbox[2] - bbox[0]
+                bh = bbox[3] - bbox[1]
+                analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None)
 
         annotated = frame.copy()
         cv2.line(annotated, (int(analyzer.split_0), 0), (int(analyzer.split_0), height), (255, 128, 0), 2)
