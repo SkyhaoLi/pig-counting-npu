@@ -10,6 +10,10 @@
     输出标注视频、ID事件CSV、轨迹报告CSV、状态变化TXT、计数汇总CSV。
     用法: python track_and_count.py --video_path xx.mp4 --model_path best.pt --output_dir ./out
 
+  pig_counting_agent.py
+    统一Agent实现。整合人工复核、诊断分析、运行状态监控功能。
+    诊断输出为TXT格式。
+
   npu_detector.py
     NPU推理封装类(ACL接口)。加载OM模型, 完成预处理/推理/NMS后处理。
     根目录这份供本地参考, deploy_atlas/里有板子上实际运行的副本。
@@ -19,12 +23,28 @@
     Atlas 200I DK A2板子(192.168.137.100)。
     用法: python deploy_to_atlas.py
 
-  batch_rerun_group4.py
-  batch_rerun_group5.py
-  batch_rerun_group6.py
+  diagnose_existing_outputs.py
+    为既有批处理输出目录补生成诊断TXT报告与汇总CSV。
+    用法: python diagnose_existing_outputs.py
+
+  review_agent.py / diagnosis_agent.py
+    人工复核/诊断Agent入口, 内部调用pig_counting_agent.py。
+
+  human_review.py
+    人工复核工具函数(加载/应用修正记录)。
+
+  review_registry.json
+    人工复核修正记录(论文用修正计数)。
+
+  batch_rerun_group4.py / batch_rerun_group5.py / batch_rerun_group6.py
     PC端批量处理脚本, 分别对应数据集第四/五/六组。
     调用track_and_count.py逐个处理视频, 汇总结果到batch_results.csv。
-    用法: python batch_rerun_group4.py
+
+  batch_rerun_mindspore_review.py
+    MindSpore批量复跑脚本, 带人工复核与诊断输出。
+
+  agent_smoke_test.py
+    本地smoke test, 验证Agent导入链和基本功能。
 
 
 二、trackers/ —— ByteTrack追踪器
@@ -35,7 +55,7 @@
     ├── basetrack.py          轨迹基类(TrackState状态机)
     ├── kalman_filter.py      卡尔曼滤波(预测+更新)
     ├── matching.py           IoU计算、匈牙利匹配、分数融合
-    ├── byte_tracker_public.py  公开版追踪器(未使用, 可选保留)
+    ├── byte_tracker_public.py  公开版追踪器(可选保留)
     └── __init__.py
 
   这是ByteTrack论文的完整实现, PC端和NPU端共用。
@@ -43,6 +63,15 @@
 
 三、deploy_atlas/ —— Atlas板子部署包
 ─────────────────────────────────────
+
+  web_monitor.py
+    实时网页监控系统。支持:
+    - 浏览器上传视频进行离线推理
+    - RTSP摄像头实时监控(MJPEG流推送)
+    - 三栏布局: 视频流 + 实时统计 + 推理历史
+    - 推理历史持久化, 支持诊断报告生成/下载/删除
+    - 跳帧优化(skip_interval=2, 每2帧推理1次, 帧率翻倍)
+    浏览器访问 http://192.168.137.100:8080
 
   track_and_count_npu.py
     NPU版计数主脚本。逻辑与track_and_count.py一致,
@@ -55,10 +84,11 @@
   batch_run_npu.py
     NPU端批量处理脚本。遍历视频目录, 逐个调用track_and_count_npu.py。
 
-  web_monitor.py
-    实时网页监控系统。RTSP摄像头输入 + NPU推理 + MJPEG网页流。
-    浏览器访问http://192.168.137.100:8080查看实时画面和计数。
-    支持重置计数、下载CSV、趋势图。
+  autonomous_agent.py
+    自主运维Agent, 封装PigCountingAgent用于web_monitor的状态监控。
+
+  bootstrap_board.sh
+    板端环境初始化脚本。检查依赖、语法校验、打印启动提示。
 
   trackers/
     ByteTrack追踪器副本(与根目录trackers/内容相同, 部署到板子上用)。
@@ -85,7 +115,9 @@
     地址: 192.168.137.100 (HwHiAiUser / Mind@123)
     模型: ~/pig_counting/models/yolov8n_pig_fp16.om
     环境: CANN 7.0.RC1, Python 3.10.6, opencv-python, numpy
+    CANN环境: source /usr/local/Ascend/ascend-toolkit/set_env.sh
 
   摄像头:
     IP: 192.168.2.103 (admin / admin123@)
-    RTSP: rtsp://admin:admin123@@192.168.2.103:554/cam/realmonitor?channel=1&subtype=1
+    RTSP: rtsp://admin:admin123%40@192.168.2.103:554/cam/realmonitor?channel=1&subtype=1
+    注意: 板子需要先添加摄像头网段IP: ip addr add 192.168.2.100/24 dev eth0

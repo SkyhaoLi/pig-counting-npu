@@ -5,7 +5,7 @@
 ## 系统架构
 
 ```
-RTSP摄像头 → 抓帧 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 → BYTETracker多目标跟踪 → 双向穿线计数 → Web实时展示
+RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 → BYTETracker多目标跟踪 → 双向穿线计数 → Web实时展示
 ```
 
 ### 核心算法：双向穿线计数 (bidir)
@@ -16,22 +16,45 @@ RTSP摄像头 → 抓帧 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 →
 - **左→右穿线**：计数 -1（仅当该 ID 之前已 +1，防止折返重复计数）
 - **最终计数** = 三条线计数的**中位数**（消除单线噪声）
 
+### 网页监控功能
+
+- 浏览器上传视频文件进行离线推理
+- RTSP 摄像头实时监控（MJPEG 流推送）
+- 三栏布局：视频流 + 实时统计 + 推理历史
+- 推理历史持久化，支持诊断报告生成与下载
+- 单条记录删除
+- 统一 PigCountingAgent 提供运行状态监控与异常检测
+
+### 跳帧优化
+
+- 每 2 帧执行 1 次检测+追踪（`skip_interval=2`）
+- 跳过帧仍更新画面显示，不影响视频流畅度
+- ByteTrack 卡尔曼滤波在跳帧间隙自动预测位置，追踪精度几乎无损
+
 
 ## 项目结构
 
 ```
 ├── Jin的U盘资料/YOLO_MindSpore/
 │   ├── track_and_count.py          # PC端计数主脚本 (PyTorch YOLO + ByteTrack)
+│   ├── pig_counting_agent.py       # 统一Agent (监控/诊断/人工复核)
 │   ├── npu_detector.py             # NPU推理封装类 (ACL接口)
 │   ├── deploy_to_atlas.py          # SSH/SFTP自动部署到Atlas板子
+│   ├── diagnose_existing_outputs.py # 为既有输出补生成诊断TXT报告
 │   ├── batch_rerun_group*.py       # PC端批量处理脚本
+│   ├── review_agent.py             # 人工复核Agent入口
+│   ├── diagnosis_agent.py          # 诊断Agent入口
+│   ├── human_review.py             # 人工复核工具函数
+│   ├── review_registry.json        # 人工复核修正记录
 │   ├── 项目说明.txt                 # 详细文件说明
 │   │
 │   ├── deploy_atlas/               # Atlas板子部署包
+│   │   ├── web_monitor.py          # 实时网页监控系统 (含跳帧优化)
 │   │   ├── track_and_count_npu.py  # NPU版计数主脚本
 │   │   ├── npu_detector.py         # NPU检测器 (ACL + OM模型)
 │   │   ├── batch_run_npu.py        # NPU端批量处理
-│   │   ├── web_monitor.py          # 实时网页监控系统
+│   │   ├── autonomous_agent.py     # 自主运维Agent
+│   │   ├── bootstrap_board.sh      # 板端环境初始化脚本
 │   │   └── trackers/               # ByteTrack追踪器副本
 │   │
 │   └── trackers/                   # ByteTrack追踪器
@@ -40,6 +63,10 @@ RTSP摄像头 → 抓帧 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 →
 │           ├── basetrack.py        # 轨迹基类 & 状态机
 │           ├── kalman_filter.py    # 卡尔曼滤波
 │           └── matching.py         # IoU匹配 & 匈牙利算法
+│
+├── paper_assets/                   # 论文素材生成脚本
+├── 同步教程acl.docx                 # ACL环境配置教程
+└── README.md
 ```
 
 ## 运行环境
@@ -138,3 +165,22 @@ python3 batch_run_npu.py \
 - 3 条计数线取中位数，抑制单线误触发
 - 双向计数自动抵消折返猪只
 - Ghost ID 过滤：存活帧数 < 5 的短命轨迹不参与计数
+
+### 跳帧策略
+
+- `skip_interval=2`：每 2 帧做 1 次 NPU 推理，有效帧率翻倍
+- 跳过帧仅跳过检测和追踪更新，画面仍正常推送
+- ByteTrack 卡尔曼滤波在间隙帧自动预测轨迹位置
+- 猪只移动速度慢，跳 1 帧对追踪精度几乎无影响
+
+### 输出文件
+
+每次推理完成后生成：
+
+| 文件 | 内容 |
+|------|------|
+| `ByteTrack_id_events.csv` | 每个 ID 的出现/区域变化事件日志 |
+| `ByteTrack_state_changes.txt` | 各 ID 轨迹详情与有效性判定 |
+| `ByteTrack_trajectory_report.csv` | 轨迹分析汇总 |
+| `ByteTrack_summary.csv` | 三线计数与最终结果 |
+| `ByteTrack_diagnosis.txt` | 诊断报告（异常检测、建议） |
