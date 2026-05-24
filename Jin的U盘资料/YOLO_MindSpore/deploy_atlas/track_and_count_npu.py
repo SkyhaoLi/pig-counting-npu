@@ -27,6 +27,9 @@ from trackers.byte_tracker.byte_tracker import BYTETracker
 from types import SimpleNamespace
 from npu_detector import NPUDetector
 
+# 健康预警模块（体重估计 + 健康评分）
+from health_module import diagnose_trajectory, aggregate_herd
+
 
 class PigTrajectory:
     """跟踪单只猪的轨迹和状态变化"""
@@ -178,7 +181,39 @@ class ZoneAnalyzer:
                     'details': f"ID {track_id}: {old_zone} -> {zone}"
                 })
 
-    def finalize(self, output_dir, tracker_name):
+    def _compute_health_diagnoses(self, frame_area=None):
+        """对所有有效轨迹做健康诊断，返回 ({tid: diag}, herd_summary)。"""
+        diagnoses = {}
+        valid_only = []
+        for tid, traj in self.trajectories.items():
+            is_valid, _ = traj.analyze()
+            if not is_valid:
+                continue
+            diag = diagnose_trajectory(
+                box_sizes=traj.box_sizes,
+                positions=traj.positions,
+                fps=self.fps,
+                frame_area=frame_area,
+            )
+            diagnoses[tid] = diag
+            valid_only.append(diag)
+
+        herd = aggregate_herd(valid_only) if valid_only else None
+        if herd and herd["n"] > 1:
+            herd_stats = {"weight_mean": herd["weight_mean"], "weight_std": herd["weight_std"]}
+            for tid in list(diagnoses.keys()):
+                traj = self.trajectories[tid]
+                diagnoses[tid] = diagnose_trajectory(
+                    box_sizes=traj.box_sizes, positions=traj.positions,
+                    fps=self.fps, frame_area=frame_area, herd_stats=herd_stats,
+                )
+            herd = aggregate_herd(list(diagnoses.values()))
+        return diagnoses, herd
+
+    def finalize(self, output_dir, tracker_name, frame_area=None):
+        # 健康诊断
+        diagnoses, herd = self._compute_health_diagnoses(frame_area=frame_area)
+
         events_path = output_dir / f"{tracker_name}_id_events.csv"
         with open(events_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=['frame', 'timestamp', 'event', 'track_id', 'zone', 'details'])
@@ -207,12 +242,25 @@ class ZoneAnalyzer:
                 f.write(f"  Avg Speed: {traj.get_avg_speed(self.fps):.1f} px/s\n")
                 f.write(f"  Avg Conf: {traj.get_avg_confidence():.2f}\n")
                 f.write(f"  Lost Frames: {len(traj.lost_frames)}\n")
-                f.write(f"  Recoveries: {traj.recovered_count}\n\n")
+                f.write(f"  Recoveries: {traj.recovered_count}\n")
+                if tid in diagnoses:
+                    d = diagnoses[tid]
+                    flag_str = ",".join(d["abnormal_flags"]) if d["abnormal_flags"] else "-"
+                    f.write(f"  [Health] Weight: {d['weight_kg']} kg\n")
+                    f.write(f"  [Health] Posture: {d['posture']} (entropy {d['posture_entropy']})\n")
+                    f.write(f"  [Health] Activity: {d['activity_score']}\n")
+                    f.write(f"  [Health] Score: {d['health_score']}\n")
+                    f.write(f"  [Health] Flags: {flag_str}\n")
+                f.write("\n")
                 if is_valid:
                     self.valid_count += 1
             f.write(f"{'=' * 70}\n")
             f.write(f"TOTAL VALID: {self.valid_count}\n")
             f.write(f"TOTAL IDs: {len(self.trajectories)}\n")
+            if herd and herd["n"] > 0:
+                f.write(f"GROUP HEALTH MEAN: {herd['health_mean']:.3f}\n")
+                f.write(f"GROUP WEIGHT MEAN: {herd['weight_mean']:.1f} kg (std {herd['weight_std']:.1f})\n")
+                f.write(f"ABNORMAL COUNT: {herd['abnormal_count']}\n")
             f.write(f"{'=' * 70}\n")
 
         line0 = self.line_counters['line0']
@@ -222,14 +270,34 @@ class ZoneAnalyzer:
         summary_path = output_dir / f"{tracker_name}_summary.csv"
         with open(summary_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids'])
-            writer.writerow([line0, line1, line2, total_line, self.valid_count, len(self.trajectories)])
+            writer.writerow([
+                'line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids',
+                'avg_weight_kg', 'weight_min_kg', 'weight_max_kg', 'weight_std_kg',
+                'group_health_score', 'abnormal_count',
+                'low_health_count', 'weight_outlier_count',
+            ])
+            if herd and herd["n"] > 0:
+                writer.writerow([
+                    line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    round(herd['weight_mean'], 2), round(herd['weight_min'], 2),
+                    round(herd['weight_max'], 2), round(herd['weight_std'], 2),
+                    round(herd['health_mean'], 3), herd['abnormal_count'],
+                    herd['low_health_count'], herd['weight_outlier_count'],
+                ])
+            else:
+                writer.writerow([
+                    line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                ])
 
         report_path = output_dir / f"{tracker_name}_trajectory_report.csv"
         with open(report_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['TrackID', 'IsValid', 'Reason', 'FirstFrame', 'FirstTime(s)',
-                             'LastFrame', 'LastTime(s)', 'Duration(s)', 'ZoneHistory', 'StateChanges'])
+            writer.writerow([
+                'TrackID', 'IsValid', 'Reason', 'FirstFrame', 'FirstTime(s)',
+                'LastFrame', 'LastTime(s)', 'Duration(s)', 'ZoneHistory', 'StateChanges',
+                'EstWeight(kg)', 'Posture', 'ActivityScore', 'HealthScore', 'AbnormalFlags',
+            ])
             for tid in sorted(self.trajectories.keys()):
                 traj = self.trajectories[tid]
                 is_valid, reason = traj.analyze()
@@ -237,14 +305,59 @@ class ZoneAnalyzer:
                 zone_str = "->".join(traj.zone_history)
                 changes_str = "; ".join(
                     [f"{c['timestamp']}: {c['from_zone']}->{c['to_zone']}" for c in traj.state_changes])
-                writer.writerow([tid, is_valid, reason, traj.first_frame,
-                                 f"{traj.first_frame / self.fps:.2f}", traj.last_frame,
-                                 f"{traj.last_frame / self.fps:.2f}", f"{duration:.2f}",
-                                 zone_str, changes_str])
+                if tid in diagnoses:
+                    d = diagnoses[tid]
+                    weight_s, posture_s = d['weight_kg'], d['posture']
+                    activity_s, health_s = d['activity_score'], d['health_score']
+                    flags_s = ",".join(d['abnormal_flags']) if d['abnormal_flags'] else ''
+                else:
+                    weight_s = posture_s = activity_s = health_s = flags_s = ''
+                writer.writerow([
+                    tid, is_valid, reason, traj.first_frame,
+                    f"{traj.first_frame / self.fps:.2f}", traj.last_frame,
+                    f"{traj.last_frame / self.fps:.2f}", f"{duration:.2f}",
+                    zone_str, changes_str,
+                    weight_s, posture_s, activity_s, health_s, flags_s,
+                ])
 
-        print(f"  {tracker_name}: Events CSV    -> {events_path}")
-        print(f"  {tracker_name}: State TXT     -> {txt_path}")
+        # 健康预警独立诊断报告
+        health_path = output_dir / f"{tracker_name}_health_report.txt"
+        with open(health_path, 'w', encoding='utf-8') as f:
+            f.write(f"{'=' * 70}\n")
+            f.write(f"Pig Health Report - {tracker_name}\n")
+            f.write(f"{'=' * 70}\n\n")
+            if herd and herd["n"] > 0:
+                f.write(f"[Herd] n={herd['n']}\n")
+                f.write(f"  Weight mean {herd['weight_mean']:.1f} kg")
+                f.write(f"  (min {herd['weight_min']:.1f} / max {herd['weight_max']:.1f}")
+                f.write(f" / std {herd['weight_std']:.1f})\n")
+                f.write(f"  Health mean: {herd['health_mean']:.3f}\n")
+                f.write(f"  Abnormal: {herd['abnormal_count']}")
+                f.write(f"  (low_health {herd['low_health_count']}")
+                f.write(f" / weight_outlier {herd['weight_outlier_count']})\n\n")
+            else:
+                f.write("[Herd] no valid individuals\n\n")
+            f.write(f"[Individuals]\n")
+            abnormal_ids = []
+            for tid in sorted(diagnoses.keys()):
+                d = diagnoses[tid]
+                line = f"  ID#{tid}: weight {d['weight_kg']} kg | posture {d['posture']} | "
+                line += f"activity {d['activity_score']} | health {d['health_score']}"
+                if d['abnormal_flags']:
+                    line += f" | ALERT {','.join(d['abnormal_flags'])}"
+                    abnormal_ids.append(tid)
+                f.write(line + "\n")
+            if abnormal_ids:
+                f.write(f"\n[Alert] {len(abnormal_ids)} pigs need attention: {abnormal_ids}\n")
+            else:
+                f.write(f"\n[Alert] all OK\n")
+            f.write(f"\n{'=' * 70}\n")
+
+        print(f"  {tracker_name}: Events CSV     -> {events_path}")
+        print(f"  {tracker_name}: State TXT      -> {txt_path}")
         print(f"  {tracker_name}: Trajectory CSV -> {report_path}")
+        print(f"  {tracker_name}: Summary CSV    -> {summary_path}")
+        print(f"  {tracker_name}: Health TXT     -> {health_path}")
         return self.valid_count
 
 
@@ -357,7 +470,7 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
     out.release()
     pbar.close()
 
-    valid_count = analyzer.finalize(output_dir, "ByteTrack")
+    valid_count = analyzer.finalize(output_dir, "ByteTrack", frame_area=width * height)
     print(f"  Video: {output_video}")
     print(f"  Valid Count: {valid_count}")
     return valid_count, len(analyzer.trajectories)

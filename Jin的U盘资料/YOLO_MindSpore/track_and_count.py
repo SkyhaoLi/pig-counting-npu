@@ -31,6 +31,9 @@ from types import SimpleNamespace
 # 导入YOLO
 from ultralytics import YOLO
 
+# 健康预警模块（体重估计 + 健康评分）
+from health_module import diagnose_trajectory, aggregate_herd
+
 
 class PigTrajectory:
     """跟踪单只猪的轨迹和状态变化"""
@@ -228,8 +231,48 @@ class ZoneAnalyzer:
                 count += 1
         return count
 
-    def finalize(self, output_dir, tracker_name):
-        """保存详细报告 - 精确到秒"""
+    def _compute_health_diagnoses(self, frame_area=None):
+        """对所有有效轨迹做健康诊断，返回 {tid: diag_dict}。"""
+        diagnoses = {}
+        valid_only = []
+        for tid, traj in self.trajectories.items():
+            is_valid, _ = traj.analyze()
+            if not is_valid:
+                continue
+            diag = diagnose_trajectory(
+                box_sizes=traj.box_sizes,
+                positions=traj.positions,
+                fps=self.fps,
+                frame_area=frame_area,
+            )
+            diagnoses[tid] = diag
+            valid_only.append(diag)
+
+        herd = aggregate_herd(valid_only) if valid_only else None
+
+        # 第二轮：用群体均值/标准差重算异常标记（含 WEIGHT_OUTLIER）
+        if herd and herd["n"] > 1:
+            herd_stats = {
+                "weight_mean": herd["weight_mean"],
+                "weight_std": herd["weight_std"],
+            }
+            for tid in list(diagnoses.keys()):
+                traj = self.trajectories[tid]
+                diagnoses[tid] = diagnose_trajectory(
+                    box_sizes=traj.box_sizes,
+                    positions=traj.positions,
+                    fps=self.fps,
+                    frame_area=frame_area,
+                    herd_stats=herd_stats,
+                )
+            herd = aggregate_herd(list(diagnoses.values()))
+        return diagnoses, herd
+
+    def finalize(self, output_dir, tracker_name, frame_area=None):
+        """保存详细报告 - 精确到秒（含健康预警字段）"""
+        # 健康诊断（一次性算好供后续多文件复用）
+        diagnoses, herd = self._compute_health_diagnoses(frame_area=frame_area)
+
         # 1. ID事件日志 (CSV)
         events_path = output_dir / f"{tracker_name}_id_events.csv"
         with open(events_path, 'w', encoding='utf-8', newline='') as f:
@@ -237,7 +280,7 @@ class ZoneAnalyzer:
             writer.writeheader()
             writer.writerows(self.id_events)
 
-        # 2. 详细状态变化日志 (TXT) - 精确到秒
+        # 2. 详细状态变化日志 (TXT) - 精确到秒（附加健康字段）
         txt_path = output_dir / f"{tracker_name}_state_changes.txt"
         with open(txt_path, 'w', encoding='utf-8') as f:
             f.write(f"{'=' * 70}\n")
@@ -261,12 +304,22 @@ class ZoneAnalyzer:
                         f.write(
                             f"    [{change['timestamp']}] Frame {change['frame']}: {change['from_zone']} -> {change['to_zone']}\n")
 
-                # 新增调试信息
+                # 调试信息
                 f.write(f"  移动距离: {traj.get_travel_distance():.1f} px\n")
                 f.write(f"  平均速度: {traj.get_avg_speed(self.fps):.1f} px/s\n")
                 f.write(f"  平均置信度: {traj.get_avg_confidence():.2f}\n")
                 f.write(f"  丢失帧数: {len(traj.lost_frames)}\n")
                 f.write(f"  恢复次数: {traj.recovered_count}\n")
+
+                # 健康预警字段
+                if tid in diagnoses:
+                    d = diagnoses[tid]
+                    flag_str = ",".join(d["abnormal_flags"]) if d["abnormal_flags"] else "—"
+                    f.write(f"  [健康] 体重估计: {d['weight_kg']} kg\n")
+                    f.write(f"  [健康] 姿态: {d['posture']} (熵 {d['posture_entropy']})\n")
+                    f.write(f"  [健康] 活动度: {d['activity_score']}\n")
+                    f.write(f"  [健康] 综合评分: {d['health_score']}\n")
+                    f.write(f"  [健康] 异常标记: {flag_str}\n")
                 f.write("\n")
 
                 if is_valid:
@@ -275,9 +328,13 @@ class ZoneAnalyzer:
             f.write(f"{'=' * 70}\n")
             f.write(f"TOTAL VALID: {self.valid_count}\n")
             f.write(f"TOTAL IDs: {len(self.trajectories)}\n")
+            if herd and herd["n"] > 0:
+                f.write(f"GROUP HEALTH MEAN: {herd['health_mean']:.3f}\n")
+                f.write(f"GROUP WEIGHT MEAN: {herd['weight_mean']:.1f} kg (std {herd['weight_std']:.1f})\n")
+                f.write(f"ABNORMAL COUNT: {herd['abnormal_count']}\n")
             f.write(f"{'=' * 70}\n")
 
-        # 保存线穿越法汇总
+        # 3. 线穿越法汇总 (CSV) — 扩展健康字段
         line0 = self.line_counters['line0']
         line1 = self.line_counters['line1']
         line2 = self.line_counters['line2']
@@ -285,15 +342,42 @@ class ZoneAnalyzer:
         summary_path = output_dir / f"{tracker_name}_summary.csv"
         with open(summary_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids'])
-            writer.writerow([line0, line1, line2, total_line, self.valid_count, len(self.trajectories)])
+            writer.writerow([
+                'line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids',
+                # ★ 健康预警新增字段
+                'avg_weight_kg', 'weight_min_kg', 'weight_max_kg', 'weight_std_kg',
+                'group_health_score', 'abnormal_count',
+                'low_health_count', 'weight_outlier_count',
+            ])
+            if herd and herd["n"] > 0:
+                writer.writerow([
+                    line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    round(herd['weight_mean'], 2),
+                    round(herd['weight_min'], 2),
+                    round(herd['weight_max'], 2),
+                    round(herd['weight_std'], 2),
+                    round(herd['health_mean'], 3),
+                    herd['abnormal_count'],
+                    herd['low_health_count'],
+                    herd['weight_outlier_count'],
+                ])
+            else:
+                writer.writerow([
+                    line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                ])
 
-        # 3. 轨迹分析报告 (CSV)
+        # 4. 轨迹分析报告 (CSV) — 扩展健康字段
         report_path = output_dir / f"{tracker_name}_trajectory_report.csv"
         with open(report_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['TrackID', 'IsValid', 'Reason', 'FirstFrame', 'FirstTime(s)', 'LastFrame', 'LastTime(s)',
-                             'Duration(s)', 'ZoneHistory', 'StateChanges'])
+            writer.writerow([
+                'TrackID', 'IsValid', 'Reason',
+                'FirstFrame', 'FirstTime(s)', 'LastFrame', 'LastTime(s)',
+                'Duration(s)', 'ZoneHistory', 'StateChanges',
+                # ★ 健康预警新增字段
+                'EstWeight(kg)', 'Posture', 'ActivityScore', 'HealthScore', 'AbnormalFlags',
+            ])
 
             for tid in sorted(self.trajectories.keys()):
                 traj = self.trajectories[tid]
@@ -303,16 +387,68 @@ class ZoneAnalyzer:
                 changes_str = "; ".join(
                     [f"{c['timestamp']}: {c['from_zone']}->{c['to_zone']}" for c in traj.state_changes])
 
+                if tid in diagnoses:
+                    d = diagnoses[tid]
+                    weight_s = d['weight_kg']
+                    posture_s = d['posture']
+                    activity_s = d['activity_score']
+                    health_s = d['health_score']
+                    flags_s = ",".join(d['abnormal_flags']) if d['abnormal_flags'] else ''
+                else:
+                    weight_s = posture_s = activity_s = health_s = flags_s = ''
+
                 writer.writerow([
                     tid, is_valid, reason,
                     traj.first_frame, f"{traj.first_frame / self.fps:.2f}",
                     traj.last_frame, f"{traj.last_frame / self.fps:.2f}",
-                    f"{duration:.2f}", zone_str, changes_str
+                    f"{duration:.2f}", zone_str, changes_str,
+                    weight_s, posture_s, activity_s, health_s, flags_s,
                 ])
 
-        print(f"  {tracker_name}: Events CSV    -> {events_path}")
-        print(f"  {tracker_name}: State TXT     -> {txt_path}")
+        # 5. ★ 健康预警独立诊断报告 (TXT)
+        health_path = output_dir / f"{tracker_name}_health_report.txt"
+        with open(health_path, 'w', encoding='utf-8') as f:
+            f.write(f"{'=' * 70}\n")
+            f.write(f"猪只健康预警报告 — {tracker_name}\n")
+            f.write(f"{'=' * 70}\n\n")
+
+            if herd and herd["n"] > 0:
+                f.write(f"[群体概览] 有效个体数: {herd['n']}\n")
+                f.write(f"  平均体重: {herd['weight_mean']:.1f} kg")
+                f.write(f"  (min {herd['weight_min']:.1f} / max {herd['weight_max']:.1f}")
+                f.write(f" / std {herd['weight_std']:.1f})\n")
+                f.write(f"  群体健康均值: {herd['health_mean']:.3f}\n")
+                f.write(f"  异常个体: {herd['abnormal_count']}")
+                f.write(f"  (低健康 {herd['low_health_count']}")
+                f.write(f" / 体重离群 {herd['weight_outlier_count']})\n\n")
+            else:
+                f.write("[群体概览] 无有效个体可分析\n\n")
+
+            f.write(f"[个体诊断]\n")
+            abnormal_ids = []
+            for tid in sorted(diagnoses.keys()):
+                d = diagnoses[tid]
+                line = f"  ID#{tid}: 体重 {d['weight_kg']} kg | 姿态 {d['posture']} | "
+                line += f"活动度 {d['activity_score']} | 健康 {d['health_score']}"
+                if d['abnormal_flags']:
+                    line += f" | ⚠ {','.join(d['abnormal_flags'])}"
+                    abnormal_ids.append(tid)
+                f.write(line + "\n")
+
+            if abnormal_ids:
+                f.write(f"\n[告警] 共 {len(abnormal_ids)} 头猪需关注: {abnormal_ids}\n")
+                f.write(f"  建议: 人工复查异常个体的活动度与采食情况；\n")
+                f.write(f"        如连续 2 次诊断异常，考虑兽医介入。\n")
+            else:
+                f.write(f"\n[告警] 当前批次无异常 ✓\n")
+
+            f.write(f"\n{'=' * 70}\n")
+
+        print(f"  {tracker_name}: Events CSV     -> {events_path}")
+        print(f"  {tracker_name}: State TXT      -> {txt_path}")
         print(f"  {tracker_name}: Trajectory CSV -> {report_path}")
+        print(f"  {tracker_name}: Summary CSV    -> {summary_path}")
+        print(f"  {tracker_name}: Health TXT     -> {health_path}")
         return self.valid_count
 
 
@@ -470,8 +606,8 @@ def run_bytetrack(model, video_path, output_dir, fps, width, height, limit=0, ou
     out.release()
     pbar.close()
 
-    # Finalize
-    valid_count = analyzer.finalize(output_dir, "ByteTrack")
+    # Finalize（传入画面面积用于体重透视校正）
+    valid_count = analyzer.finalize(output_dir, "ByteTrack", frame_area=width * height)
     print(f"  Video: {output_video}")
     print(f"  Valid Count: {valid_count}")
 

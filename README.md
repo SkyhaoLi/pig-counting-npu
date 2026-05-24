@@ -1,11 +1,12 @@
-# 猪只智能计数系统
+# 猪只智能感知与健康预警一体化系统
 
-基于 YOLOv8 + BYTETracker + 三线中位数投票的猪只自动计数系统，部署在华为 Atlas 200I DK A2 (Ascend 310B4) NPU 开发板上，支持 RTSP 摄像头实时计数和网页监控。
+基于 YOLOv8 + BYTETracker + 三线中位数投票 + 启发式健康评分的边缘 AI 系统，部署在华为 Atlas 200I DK A2 (Ascend 310B4) NPU 开发板上，支持 RTSP 摄像头实时计数、体重估计、健康预警与网页监控。
 
 ## 系统架构
 
 ```
-RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤 → BYTETracker多目标跟踪 → 双向穿线计数 → Web实时展示
+RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33ms) → 蓝色物体过滤
+   → BYTETracker多目标跟踪 → 双向穿线计数 + 健康预警(体重/姿态/活动度) → Web实时展示
 ```
 
 ### 核心算法：双向穿线计数 (bidir)
@@ -15,6 +16,20 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 - **右→左穿线**：计数 +1（同一 ID 每条线只计一次）
 - **左→右穿线**：计数 -1（仅当该 ID 之前已 +1，防止折返重复计数）
 - **最终计数** = 三条线计数的**中位数**（消除单线噪声）
+
+### ★ 健康预警子系统（2026 比赛新增）
+
+对每条 ByteTrack 有效轨迹做实时诊断，输出体重估计、姿态、活动度、综合健康评分与异常标记：
+
+- **体重估计**：基于框面积 + 透视校正的启发式方法（MVP 阶段）；
+  训练完成后可一键替换为 MobileViT-S 回归模型（参考 CV4PigBW MAE 2.95 kg / MAPE 3.08%）
+- **姿态识别**：宽高比启发式 (standing / lying_side / lying_belly) + 姿态多样性熵
+- **活动度评分**：单位时间像素位移归一化
+- **综合健康评分**：`0.5·活动度 + 0.25·姿态权重 + 0.15·姿态熵 - 0.10·异常比例`
+- **群体异常检测**：Z-score 体重离群 + 健康阈值告警
+- **可替换模型接口**：`set_weight_model()` / `set_health_model()` 支持训练完成后无缝注入
+
+健康预警代码位于 `Jin的U盘资料/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`。
 
 ### 网页监控功能
 
@@ -180,7 +195,17 @@ python3 batch_run_npu.py \
 | 文件 | 内容 |
 |------|------|
 | `ByteTrack_id_events.csv` | 每个 ID 的出现/区域变化事件日志 |
-| `ByteTrack_state_changes.txt` | 各 ID 轨迹详情与有效性判定 |
-| `ByteTrack_trajectory_report.csv` | 轨迹分析汇总 |
-| `ByteTrack_summary.csv` | 三线计数与最终结果 |
+| `ByteTrack_state_changes.txt` | 各 ID 轨迹详情、有效性判定、★ 健康字段 |
+| `ByteTrack_trajectory_report.csv` | 轨迹分析汇总，★ 新增 EstWeight / Posture / ActivityScore / HealthScore / AbnormalFlags |
+| `ByteTrack_summary.csv` | 三线计数 + 最终结果，★ 新增 avg_weight_kg / group_health_score / abnormal_count 等 |
 | `ByteTrack_diagnosis.txt` | 诊断报告（异常检测、建议） |
+| **★ `ByteTrack_health_report.txt`** | **新增**：群体健康概览 + 个体诊断 + 异常告警清单 |
+
+## 比赛材料（competition/）
+
+为 2026 中国大学生网络技术挑战赛准备的完整材料：
+
+- `competition/猪只智能感知与健康预警系统_作品设计草稿.docx` — Word 版作品设计文档
+- `competition/training/` — Kaggle/Colab T4 就绪的训练脚本（体重回归 / 行为分类 / V-JEPA LoRA）
+- `competition/generalization/` — 五大泛化场景（牛 / 鸡 / 水产 / 实验动物 / 公共安全）的 4 周落地方案
+- `competition/verify_integration.py` — 端到端集成验证脚本，用 mock 数据走通健康预警链路

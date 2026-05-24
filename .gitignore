@@ -41,3 +41,7 @@ Thumbs.db
 # Temp
 *.tmp
 /dev/shm/
+
+# Competition: 测试产物 / 训练运行目录
+competition/verify_output/
+competition/training/runs/

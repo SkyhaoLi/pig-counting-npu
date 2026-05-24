@@ -137,6 +137,7 @@ RESULT_FILES = {
     'id_events.csv': 'ByteTrack_id_events.csv',
     'trajectory.csv': 'ByteTrack_trajectory_report.csv',
     'state_changes.txt': 'ByteTrack_state_changes.txt',
+    'health_report.txt': 'ByteTrack_health_report.txt',
 }
 
 
@@ -156,10 +157,10 @@ def get_total_count(analyzer):
     return round((line0 + line1 + line2) / 3.0)
 
 
-def export_result_files(analyzer, output_dir):
+def export_result_files(analyzer, output_dir, frame_area=None):
     output_dir.mkdir(parents=True, exist_ok=True)
     analyzer.valid_count = 0
-    analyzer.finalize(output_dir, "ByteTrack")
+    analyzer.finalize(output_dir, "ByteTrack", frame_area=frame_area)
 
 
 def snapshot_completed_results(current_dir, completed_dir):
@@ -324,7 +325,7 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
             break
 
         if app_state['reset_flag']:
-            export_result_files(analyzer, current_result_dir)
+            export_result_files(analyzer, current_result_dir, frame_area=width * height)
             snapshot_completed_results(current_result_dir, completed_result_dir)
             analyzer = ZoneAnalyzer(width, fps, out_ratio, wait_ratio)
             tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
@@ -369,7 +370,7 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
         else:
             ret, frame = cap.read()
             if not ret:
-                export_result_files(analyzer, current_result_dir)
+                export_result_files(analyzer, current_result_dir, frame_area=width * height)
                 snapshot_completed_results(current_result_dir, completed_result_dir)
                 break
 
@@ -439,11 +440,11 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
                 last_export = elapsed
 
         if do_export:
-            export_result_files(analyzer, current_result_dir)
+            export_result_files(analyzer, current_result_dir, frame_area=width * height)
         frame_idx += 1
 
     if not is_stream:
-        export_result_files(analyzer, current_result_dir)
+        export_result_files(analyzer, current_result_dir, frame_area=width * height)
         snapshot_completed_results(current_result_dir, completed_result_dir)
     cap.release()
     duration = time.time() - app_state['start_time'] if app_state['start_time'] else 0
