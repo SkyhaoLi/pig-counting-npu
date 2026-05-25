@@ -96,6 +96,12 @@ class NPUDetector:
             self.output_buffers.append((buf, size))
             self.output_sizes.append(size)
 
+        # Pre-allocate pinned host buffer for D2H (avoids per-frame malloc_host)
+        out_size = self.output_sizes[0]
+        self.host_out_buf, ret = acl.rt.malloc_host(out_size)
+        assert ret == ACL_SUCCESS, f"malloc_host failed: {ret}"
+        self.host_out_size = out_size
+
     def preprocess(self, img):
         """Same preprocessing as ONNX detector."""
         h, w = img.shape[:2]
@@ -116,21 +122,29 @@ class NPUDetector:
 
         acl = self.acl
 
-        # Copy input to device
+        # ACL context is bound to the creator thread; re-attach for each call so
+        # detect() works from any worker thread (e.g. successive inference runs).
+        acl.rt.set_context(self.context)
+
+        # H2D: keep bytes alive until memcpy returns; ACL needs an int ptr
         buf, size = self.input_buffers[0]
-        data_ptr = blob.tobytes()
-        ret = acl.rt.memcpy(buf, size, data_ptr, len(data_ptr), ACL_MEMCPY_HOST_TO_DEVICE)
+        blob_contig = np.ascontiguousarray(blob)
+        src_bytes = blob_contig.tobytes()
+        src_ptr = acl.util.bytes_to_ptr(src_bytes)
+        ret = acl.rt.memcpy(buf, size, src_ptr, len(src_bytes), ACL_MEMCPY_HOST_TO_DEVICE)
         assert ret == ACL_SUCCESS, f"memcpy H2D failed: {ret}"
 
         # Run inference
         ret = acl.mdl.execute(self.model_id, self.input_dataset, self.output_dataset)
         assert ret == ACL_SUCCESS, f"execute failed: {ret}"
 
-        # Get output - first output is [1, 8400, 5] (boxes + objectness)
+        # D2H: reuse pre-allocated pinned host buffer
         buf, size = self.output_buffers[0]
-        output_data = np.zeros(size // 4, dtype=np.float32)  # float32
-        ret = acl.rt.memcpy(output_data, size, buf, size, ACL_MEMCPY_DEVICE_TO_HOST)
+        ret = acl.rt.memcpy(self.host_out_buf, self.host_out_size,
+                            buf, size, ACL_MEMCPY_DEVICE_TO_HOST)
         assert ret == ACL_SUCCESS, f"memcpy D2H failed: {ret}"
+        out_bytes = acl.util.ptr_to_bytes(self.host_out_buf, size)
+        output_data = np.frombuffer(out_bytes, dtype=np.float32).copy()
 
         # Reshape to [8400, 5]
         output = output_data.reshape(1, 8400, 5)[0]
@@ -151,12 +165,41 @@ class NPUDetector:
         y2 = (cy + h / 2) / scale
         scores = dets[:, 4]
 
+        # NMS to remove overlapping candidate boxes (YOLOv8 head emits ~8400)
+        boxes = np.stack([x1, y1, x2, y2], axis=1)
+        keep = self._nms(boxes, scores, iou_thres=0.45)
+        x1, y1, x2, y2, scores = x1[keep], y1[keep], x2[keep], y2[keep], scores[keep]
+
         results = np.stack([x1, y1, x2, y2, scores, np.zeros_like(scores)], axis=1)
         return results
+
+    @staticmethod
+    def _nms(boxes, scores, iou_thres=0.45):
+        """Pure numpy NMS."""
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w = np.maximum(0.0, xx2 - xx1)
+            h = np.maximum(0.0, yy2 - yy1)
+            inter = w * h
+            iou = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(iou <= iou_thres)[0]
+            order = order[inds + 1]
+        return np.array(keep, dtype=int)
 
     def __del__(self):
         try:
             acl = self.acl
+            if getattr(self, 'host_out_buf', None):
+                acl.rt.free_host(self.host_out_buf)
             acl.mdl.unload(self.model_id)
             acl.mdl.destroy_desc(self.model_desc)
             # Free buffers

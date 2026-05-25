@@ -31,6 +31,57 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 
 健康预警代码位于 `Jin的U盘资料/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`。
 
+#### 计算公式（MVP 启发式，无训练）
+
+所有公式实现在 `deploy_atlas/health_module.py`：
+
+| 参数 | 公式 | 函数 |
+|---|---|---|
+| 体重 (kg) | `median(框面积) / 800.0`，透视校正后 clip 到 [5, 350] | `estimate_weight_kg` |
+| 姿态 | `median(w/h)`：>1.5→lying_side，<0.7→standing，else lying_belly | `compute_posture` |
+| 姿态熵 | 三档宽高比直方图的香农熵 | `posture_entropy` |
+| 活动度 | `总位移 / 时长 / 50 px·s⁻¹`，clip 到 [0, 1] | `compute_activity` |
+| 健康分 | `0.50·活动度 + 0.25·姿态权重 + 0.15·归一熵 − 0.10·异常比例` | `compute_health_score` |
+| LOW_HEALTH | `health_score < 0.40` | `flag_abnormal` |
+| WEIGHT_OUTLIER | 群体 Z-score `\|z\| > 2.0` | `flag_abnormal` |
+
+所有系数为经验值（800.0、50 px/s、0.4、Z=2.0），训练模型注入后由模型输出取代。
+
+#### 输出文件中的健康字段
+
+每次推理结束后由 `deploy_atlas/track_and_count_npu.py:ZoneAnalyzer.finalize()` 写入：
+
+| 文件 | 健康字段 |
+|---|---|
+| `ByteTrack_summary.csv` | `avg_weight_kg, weight_min/max/std_kg, group_health_score, abnormal_count, low_health_count, weight_outlier_count` |
+| `ByteTrack_trajectory_report.csv` | `EstWeight(kg), Posture, ActivityScore, HealthScore, AbnormalFlags` |
+| `ByteTrack_state_changes.txt` | 每个 ID 末尾追加 5 行 `[Health] Weight/Posture/Activity/Score/Flags` |
+| `ByteTrack_health_report.txt` | 独立报告：群体均值/std/min/max + 每头猪个体诊断 + Alert 列表 |
+| `ByteTrack_diagnosis.txt` | 末尾「健康预警」区块：平均体重 / 群体健康分 / 异常个体数 |
+
+#### Web 端下载
+
+`web_monitor.py` 历史推理记录每条提供 6 个按钮：
+
+- **汇总** → `/download/<run_id>/summary.csv`
+- **轨迹** → `/download/<run_id>/trajectory.csv`
+- **状态** → `/download/<run_id>/state_changes.txt`（含 per-ID 健康行）
+- **健康** → `/download/<run_id>/health_report.txt`（独立健康报告）
+- **诊断** → `/download/<run_id>/diagnosis.txt`（需先点「诊断」生成）
+- **删除** → 删除单条历史记录
+
+#### 训练计划（脚本就绪，未跑）
+
+`competition/training/` 三个 Kaggle/Colab T4 就绪的脚本：
+
+| 脚本 | 模型 | 数据集 | 输出 |
+|---|---|---|---|
+| `train_weight_regressor.py` | MobileViT-S | PIGRGB-Weight (9579 张) | `weight_regressor.onnx` |
+| `train_behavior_classifier.py` | TSN-ResNet50 | China-Agri-Uni-1000 | `behavior_classifier.onnx` |
+| `finetune_vjepa.py` | V-JEPA 2 LoRA | 自有视频 + 标注 | `vjepa_pig_lora.pt` |
+
+训练完成后用 `atc` 转 `.om`，调 `health_module.set_weight_model()` / `set_health_model()` 注入板端。
+
 ### 网页监控功能
 
 - 浏览器上传视频文件进行离线推理

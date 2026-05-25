@@ -68,7 +68,8 @@ app_state = {
 
 stream_ctl = {
     'cap': None, 'source': '', 'reconnect_flag': False,
-    'reconnect_result': None, 'lock': threading.Lock(),
+    'reconnect_result': None, 'stop_event': None,
+    'lock': threading.Lock(),
 }
 
 review_store = {"path": None}
@@ -193,8 +194,11 @@ latest_frame = {'frame': None, 'lock': threading.Lock()}
 MAX_RECONNECT_ATTEMPTS = 3
 
 
-def grabber_loop():
-    while app_state.get('running', True):
+def grabber_loop(stop_event):
+    # Per-run stop_event prevents this thread from outliving its cap and
+    # touching it after the main loop releases it (was causing rc=139 segfaults
+    # on stream→file switches).
+    while not stop_event.is_set():
         with stream_ctl['lock']:
             if stream_ctl['reconnect_flag']:
                 old_cap = stream_ctl['cap']
@@ -203,6 +207,8 @@ def grabber_loop():
                 source = stream_ctl['source']
                 success = False
                 for attempt in range(MAX_RECONNECT_ATTEMPTS):
+                    if stop_event.is_set():
+                        break
                     new_cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
                     new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     if new_cap.isOpened():
@@ -220,7 +226,13 @@ def grabber_loop():
         if cap is None:
             time.sleep(0.1)
             continue
-        ret, frame = cap.read()
+        try:
+            ret, frame = cap.read()
+        except Exception:
+            time.sleep(0.05)
+            continue
+        if stop_event.is_set():
+            break
         if not ret:
             time.sleep(0.01)
             continue
@@ -254,6 +266,27 @@ def inference_loop(source, om_path, conf_thres, track_thresh, out_ratio, wait_ra
 
 
 def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, wait_ratio, output_root):
+    # Defensive cleanup: any leftover cap/grabber from a prior crashed run gets
+    # signalled to stop and released before we touch hardware again. Avoids
+    # the rc=139 segfault on RTSP→video switches.
+    with stream_ctl['lock']:
+        old_cap = stream_ctl.get('cap')
+        old_evt = stream_ctl.get('stop_event')
+        stream_ctl['cap'] = None
+        stream_ctl['source'] = ''
+        stream_ctl['stop_event'] = None
+        stream_ctl['reconnect_flag'] = False
+        stream_ctl['reconnect_result'] = None
+    if old_evt is not None:
+        old_evt.set()
+    if old_cap is not None:
+        try:
+            old_cap.release()
+        except Exception:
+            pass
+    with latest_frame['lock']:
+        latest_frame['frame'] = None
+
     detector = get_detector(om_path, conf_thres)
     agent = PigCountingAgent(log_dir=output_root)
     app_state['agent'] = agent
@@ -298,13 +331,18 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
     tracker = BYTETracker(byte_args, frame_rate=max(1, int(fps)))
 
     if is_stream:
+        stop_event = threading.Event()
         with stream_ctl['lock']:
             stream_ctl['cap'] = cap
             stream_ctl['source'] = source
             stream_ctl['reconnect_result'] = None
+            stream_ctl['stop_event'] = stop_event
         agent.note_stream_started(source)
-        gt = threading.Thread(target=grabber_loop, daemon=True)
+        gt = threading.Thread(target=grabber_loop, args=(stop_event,), daemon=True)
         gt.start()
+    else:
+        stop_event = None
+        gt = None
 
     frame_idx = 0
     skip_interval = 2  # process every Nth frame (1=all, 2=skip one, 3=skip two)
@@ -446,6 +484,17 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
     if not is_stream:
         export_result_files(analyzer, current_result_dir, frame_area=width * height)
         snapshot_completed_results(current_result_dir, completed_result_dir)
+    if is_stream and stop_event is not None:
+        stop_event.set()
+        if gt is not None:
+            gt.join(timeout=2.0)
+        with stream_ctl['lock']:
+            stream_ctl['cap'] = None
+            stream_ctl['source'] = ''
+            stream_ctl['stop_event'] = None
+            stream_ctl['reconnect_flag'] = False
+        with latest_frame['lock']:
+            latest_frame['frame'] = None
     cap.release()
     duration = time.time() - app_state['start_time'] if app_state['start_time'] else 0
     with app_state['lock']:
@@ -476,6 +525,10 @@ def stop_inference():
     with app_state['lock']:
         app_state['stop_flag'] = True
         app_state['running'] = False
+    with stream_ctl['lock']:
+        evt = stream_ctl.get('stop_event')
+    if evt is not None:
+        evt.set()
 
 
 def run_diagnosis():
@@ -590,9 +643,13 @@ input[type=text] { width: 100%; padding: 7px; border-radius: 6px; border: 1px so
 .upload-zone:hover { border-color: #38bdf8; }
 .file-list { list-style: none; max-height: 100px; overflow-y: auto; margin-bottom: 8px; }
 .file-list li { padding: 5px 8px; background: #0f172a; margin-bottom: 3px; border-radius: 4px;
-                cursor: pointer; border: 1px solid transparent; font-size: 0.82rem; }
+                cursor: pointer; border: 1px solid transparent; font-size: 0.82rem;
+                display: flex; align-items: center; gap: 6px; }
 .file-list li.selected { border-color: #38bdf8; background: #1e3a5f; }
 .file-list li:hover { background: #1e293b; }
+.btn-del-file { background: transparent; color: #f87171; border: none; cursor: pointer;
+                padding: 0 4px; font-size: 1rem; line-height: 1; border-radius: 3px; }
+.btn-del-file:hover { background: #7f1d1d; color: #fff; }
 .progress-bar { height: 3px; background: #334155; border-radius: 2px; margin: 6px 0; display: none; }
 .progress-bar .fill { height: 100%; background: #38bdf8; border-radius: 2px; transition: width 0.3s; }
 .hist-item { padding: 8px 10px; background: #0f172a; border-radius: 6px; margin-bottom: 5px;
@@ -735,10 +792,23 @@ function loadUploads(){
   fetch('/api/uploads').then(r=>r.json()).then(files=>{
     const ul=document.getElementById('fileList'); ul.innerHTML='';
     files.forEach(f=>{
-      const li=document.createElement('li'); li.textContent=f;
+      const li=document.createElement('li');
+      const name=document.createElement('span'); name.textContent=f; name.style.flex='1';
+      const del=document.createElement('button');
+      del.textContent='×'; del.title='删除该视频'; del.className='btn-del-file';
+      del.onclick=(e)=>{e.stopPropagation();deleteUpload(f);};
+      li.appendChild(name); li.appendChild(del);
       li.onclick=()=>{selectedFile=f;document.querySelectorAll('.file-list li').forEach(x=>x.classList.remove('selected'));li.classList.add('selected');document.getElementById('btnStartVideo').disabled=false;};
       ul.appendChild(li);
     });
+  });
+}
+function deleteUpload(filename){
+  if(!confirm('确定删除 '+filename+' ?'))return;
+  fetch('/api/uploads/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:filename})})
+  .then(r=>r.json()).then(d=>{
+    if(d.ok){if(selectedFile===filename){selectedFile=null;document.getElementById('btnStartVideo').disabled=true;}loadUploads();}
+    else alert(d.error||'删除失败');
   });
 }
 function deleteRun(runId){
@@ -761,6 +831,8 @@ function loadHistory(){
     el.innerHTML=records.map(r=>{
       let acts='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/summary.csv" download>汇总</a>';
       acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/trajectory.csv" download>轨迹</a>';
+      acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/state_changes.txt" download>状态</a>';
+      acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/health_report.txt" download>健康</a>';
       if(r.diagnosis){
         acts+='<a class="btn btn-primary btn-sm" href="/download/'+r.id+'/diagnosis.txt" download>诊断</a>';
       } else {
@@ -1037,7 +1109,23 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == '/api/reset':
             with app_state['lock']:
-                app_state['reset_flag'] = True
+                if app_state.get('running'):
+                    app_state['reset_flag'] = True
+                else:
+                    app_state['line_counters'] = {'line0': 0, 'line1': 0, 'line2': 0}
+                    app_state['total_count'] = 0
+                    app_state['valid_traj'] = 0
+                    app_state['total_ids'] = 0
+                    app_state['frame_count'] = 0
+                    app_state['history'] = []
+                    app_state['frame_jpeg'] = None
+                    app_state['mode'] = 'idle'
+                    app_state['source'] = ''
+                    app_state['agent_status'] = 'BOOT'
+                    app_state['anomaly_count'] = 0
+                    app_state['recovery_count'] = 0
+                    app_state['agent_events'] = []
+                    print('[RESET] (idle) counters cleared')
             self._json({'ok': True})
 
         elif path == '/api/upload':
@@ -1060,6 +1148,36 @@ class Handler(BaseHTTPRequestHandler):
             dest = upload_dir / Path(filename).name
             dest.write_bytes(filedata)
             self._json({'ok': True, 'filename': dest.name})
+
+        elif path == '/api/uploads/delete':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            filename = body.get('filename', '')
+            if not filename:
+                self._json({'ok': False, 'error': '缺少 filename'}, 400)
+                return
+            safe_name = Path(filename).name
+            if safe_name != filename or safe_name in ('', '.', '..'):
+                self._json({'ok': False, 'error': '非法文件名'}, 400)
+                return
+            upload_dir = Path(server_config['output_dir']) / 'uploads'
+            target = upload_dir / safe_name
+            try:
+                target_resolved = target.resolve()
+                if upload_dir.resolve() not in target_resolved.parents:
+                    self._json({'ok': False, 'error': '路径越界'}, 400)
+                    return
+            except OSError:
+                self._json({'ok': False, 'error': '路径解析失败'}, 400)
+                return
+            if not target.exists():
+                self._json({'ok': False, 'error': '文件不存在'}, 404)
+                return
+            try:
+                target.unlink()
+                self._json({'ok': True, 'filename': safe_name})
+            except OSError as e:
+                self._json({'ok': False, 'error': f'删除失败: {e}'}, 500)
 
         elif path == '/api/diagnose':
             length = int(self.headers.get('Content-Length', 0))

@@ -457,6 +457,18 @@ class PigCountingAgent:
         lines.append(f"  total_ids: {summary.get('total_ids')}")
         lines.append(f"  raw_error: {diagnosis.get('raw_error')}")
         lines.append(f"  paper_error: {diagnosis.get('paper_error')}")
+
+        if summary.get("avg_weight_kg") is not None:
+            lines.extend(["", f"{'-'*60}", "健康预警：", ""])
+            lines.append(f"  平均体重: {summary.get('avg_weight_kg')} kg "
+                         f"(min {summary.get('weight_min_kg')} / "
+                         f"max {summary.get('weight_max_kg')} / "
+                         f"std {summary.get('weight_std_kg')})")
+            lines.append(f"  群体健康分: {summary.get('group_health_score')}")
+            lines.append(f"  异常个体: {summary.get('abnormal_count')} "
+                         f"(低健康 {summary.get('low_health_count')} / "
+                         f"体重离群 {summary.get('weight_outlier_count')})")
+
         lines.append(f"\n{'='*60}")
 
         with open(txt_path, "w", encoding="utf-8") as f:
@@ -707,6 +719,14 @@ class PigCountingAgent:
                     "total_line": self._maybe_int(row.get("total_line")),
                     "valid_traj": self._maybe_int(row.get("valid_traj")),
                     "total_ids": self._maybe_int(row.get("total_ids")),
+                    "avg_weight_kg": self._maybe_float(row.get("avg_weight_kg")),
+                    "weight_min_kg": self._maybe_float(row.get("weight_min_kg")),
+                    "weight_max_kg": self._maybe_float(row.get("weight_max_kg")),
+                    "weight_std_kg": self._maybe_float(row.get("weight_std_kg")),
+                    "group_health_score": self._maybe_float(row.get("group_health_score")),
+                    "abnormal_count": self._maybe_int(row.get("abnormal_count")),
+                    "low_health_count": self._maybe_int(row.get("low_health_count")),
+                    "weight_outlier_count": self._maybe_int(row.get("weight_outlier_count")),
                 }
         return fallback
 

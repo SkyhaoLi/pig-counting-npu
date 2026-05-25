@@ -69,13 +69,31 @@
     - 浏览器上传视频进行离线推理
     - RTSP摄像头实时监控(MJPEG流推送)
     - 三栏布局: 视频流 + 实时统计 + 推理历史
-    - 推理历史持久化, 支持诊断报告生成/下载/删除
+    - 推理历史持久化, 每条记录提供 6 个下载按钮:
+      汇总(summary.csv) / 轨迹(trajectory_report.csv) /
+      状态(state_changes.txt) / 健康(health_report.txt) /
+      诊断(diagnosis.txt) / 删除
     - 跳帧优化(skip_interval=2, 每2帧推理1次, 帧率翻倍)
+    - 已上传视频可点 × 删除
+    - supervisor.sh 守护进程: 子进程异常退出后 3 秒内自动重启
     浏览器访问 http://192.168.137.100:8080
+
+  health_module.py
+    健康预警与体重估计模块。MVP 阶段为纯启发式公式 (numpy):
+    - 体重估计: median(框面积) / 800.0, 透视校正, clip 到 [5, 350] kg
+    - 姿态识别: median(宽高比), >1.5 lying_side / <0.7 standing / else lying_belly
+    - 活动度: 总位移/时长/50px·s, clip 到 [0, 1]
+    - 健康评分: 0.5·活动度 + 0.25·姿态权重 + 0.15·归一熵 - 0.1·异常比例
+    - 异常判别: LOW_HEALTH (health<0.4) + WEIGHT_OUTLIER (|Z|>2.0)
+    预留 set_weight_model() / set_health_model() 接口,
+    训练完 MobileViT-S 体重模型与 V-JEPA 微调权重后注入。
 
   track_and_count_npu.py
     NPU版计数主脚本。逻辑与track_and_count.py一致,
     区别是用NPUDetector替代PyTorch YOLO做检测。
+    ZoneAnalyzer.finalize() 内调 health_module.diagnose_trajectory 与
+    aggregate_herd, 把体重/姿态/活动度/健康分写入 summary.csv、
+    trajectory_report.csv、state_changes.txt、health_report.txt。
 
   npu_detector.py
     NPU检测器(板子上实际运行的版本)。
