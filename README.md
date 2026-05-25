@@ -29,7 +29,7 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 - **群体异常检测**：Z-score 体重离群 + 健康阈值告警
 - **可替换模型接口**：`set_weight_model()` / `set_health_model()` 支持训练完成后无缝注入
 
-健康预警代码位于 `Jin的U盘资料/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`。
+健康预警代码位于 `Jin的U盘资料/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`，最新改动同步在顶层 `board/health_module.py`（已加入 `set_weight_model()` 注入接口）。
 
 #### 计算公式（MVP 启发式，无训练）
 
@@ -70,15 +70,48 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 - **诊断** → `/download/<run_id>/diagnosis.txt`（需先点「诊断」生成）
 - **删除** → 删除单条历史记录
 
+#### 训练成果与板端集成
+
+体重回归模型已完成首轮训练并转换为 NPU 可推理的 .om 文件：
+
+| 产物 | 路径 | 说明 |
+|---|---|---|
+| ONNX | `runs/20260525-165217/weight_regressor.onnx` | 20.6 MB，PyTorch 导出 |
+| OM | `runs/20260525-165217/weight_regressor_fp16.om` | 12.96 MB，ATC FP16 量化，Ascend310B4 |
+| 训练指标 | `runs/*/metrics.json` | 最终 val_MAE ≈ 22 kg（高于论文 2.95 kg，需更多 epoch / 数据增强） |
+| 推理速度 | 板端 13.9 ms / 71.9 FPS | `board/weight_om.py` ACL 单帧推理 |
+
+板端 ACL 推理封装在 `board/weight_om.py`（`WeightOMModel.predict(roi_bgr) -> kg`），通过 `set_weight_model()` 注入 `health_module`。
+
+**⚠ 默认状态：关闭。** `board/track_and_count_npu.py` 中体重模型采用显式 opt-in：
+```bash
+# 关闭（默认，启发式）
+python3 track_and_count_npu.py --video xxx --output_dir yyy
+
+# 启用（显式传 .om 路径）
+python3 track_and_count_npu.py --video xxx --output_dir yyy \
+    --weight_om models/weight_regressor_fp16.om
+```
+启动日志会打印 `[health] weight model disabled (default); using heuristic` 或 `[health] weight model injected: ...` 表明当前模式。
+
 #### 训练计划（脚本就绪，未跑）
 
 `competition/training/` 三个 Kaggle/Colab T4 就绪的脚本：
 
 | 脚本 | 模型 | 数据集 | 输出 |
 |---|---|---|---|
-| `train_weight_regressor.py` | MobileViT-S | PIGRGB-Weight (9579 张) | `weight_regressor.onnx` |
+| `train_weight_regressor.py` | MobileViT-S | PIGRGB-Weight (9579 张) | `weight_regressor.onnx` ✅ 已完成首轮 |
 | `train_behavior_classifier.py` | TSN-ResNet50 | China-Agri-Uni-1000 | `behavior_classifier.onnx` |
 | `finetune_vjepa.py` | V-JEPA 2 LoRA | 自有视频 + 标注 | `vjepa_pig_lora.pt` |
+
+数据集 `PIGRGB-Weight` 已移到项目内 `datasets/PIGRGB-Weight/`（26 GB，已 gitignore）。需要时重新生成 CSV：
+```bash
+python competition/training/prepare_pigrgb_weight.py \
+    --data_root datasets/PIGRGB-Weight/full/extracted/PigRGB-Weight \
+    --out_dir datasets/PIGRGB-Weight/full --val_ratio 0.1
+```
+
+辅助脚本 `tools/push_and_atc.py`：一键登录 Atlas → 安装 SSH 公钥 → SFTP 上传 ONNX → 远端 ATC 转 OM → 拉回本地，免去手动 ssh/scp。
 
 训练完成后用 `atc` 转 `.om`，调 `health_module.set_weight_model()` / `set_health_model()` 注入板端。
 
@@ -131,6 +164,16 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 │           └── matching.py         # IoU匹配 & 匈牙利算法
 │
 ├── paper_assets/                   # 论文素材生成脚本
+├── board/                          # 板端最新改动镜像（体重模型集成）
+│   ├── health_module.py            # 加入 set_weight_model 注入接口
+│   ├── track_and_count_npu.py      # ROI 透传 + --weight_om 显式 opt-in
+│   ├── weight_om.py                # ACL 体重模型推理封装 (MobileViT-S OM)
+│   └── pig_counting_agent.py
+├── tools/
+│   └── push_and_atc.py             # SSH+SFTP+ATC 一键 ONNX→OM 工具
+├── datasets/                       # 训练数据集（gitignore）
+│   └── PIGRGB-Weight/              # 26 GB，体重回归数据集
+├── runs/                           # 训练输出（onnx/om gitignore，metrics.json 保留）
 ├── 同步教程acl.docx                 # ACL环境配置教程
 └── README.md
 ```

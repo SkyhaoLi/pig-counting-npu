@@ -49,27 +49,48 @@ except ImportError as e:
 class PigWeightDataset(Dataset):
     """PIGRGB-Weight 数据集：图像 + 体重（kg）回归。
 
-    标注约定（与 GitHub 仓库一致）：
-        每张图旁有同名 *_weight.txt，第一行写体重（kg）。
+    支持两种标注源：
+    1. CSV 模式（推荐）：由 prepare_pigrgb_weight.py 生成 train.csv/val.csv，
+       三列：image_path, weight_kg, pig_id。
+    2. 同名 *.txt 模式：每张图旁有同名 .txt，第一行写体重。
     """
 
-    def __init__(self, root: Path, split: str = "train", img_size: int = 224):
-        self.root = Path(root) / split
-        if not self.root.exists():
-            raise FileNotFoundError(f"未找到 split 目录: {self.root}")
-        self.images = sorted(self.root.rglob("*.jpg")) + sorted(self.root.rglob("*.png"))
-        self.targets = []
-        kept = []
-        for img_path in self.images:
-            w_file = img_path.with_suffix(".txt")
-            if w_file.exists():
-                try:
-                    weight = float(w_file.read_text().strip().splitlines()[0])
-                    self.targets.append(weight)
-                    kept.append(img_path)
-                except (ValueError, IndexError):
-                    continue
-        self.images = kept
+    def __init__(self, root: Path, split: str = "train", img_size: int = 224,
+                 csv_path: Path | None = None):
+        self.targets: list[float] = []
+        self.images: list[Path] = []
+
+        if csv_path is not None:
+            import csv as _csv
+            csv_path = Path(csv_path)
+            if not csv_path.exists():
+                raise FileNotFoundError(f"未找到 CSV: {csv_path}")
+            with csv_path.open("r", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    p = Path(row["image_path"])
+                    if not p.exists():
+                        continue
+                    try:
+                        w = float(row["weight_kg"])
+                    except ValueError:
+                        continue
+                    self.images.append(p)
+                    self.targets.append(w)
+        else:
+            self.root = Path(root) / split
+            if not self.root.exists():
+                raise FileNotFoundError(f"未找到 split 目录: {self.root}")
+            imgs = sorted(self.root.rglob("*.jpg")) + sorted(self.root.rglob("*.png"))
+            for img_path in imgs:
+                w_file = img_path.with_suffix(".txt")
+                if w_file.exists():
+                    try:
+                        weight = float(w_file.read_text().strip().splitlines()[0])
+                        self.targets.append(weight)
+                        self.images.append(img_path)
+                    except (ValueError, IndexError):
+                        continue
         print(f"[{split}] 有效样本数: {len(self.images)}")
 
         mean = [0.485, 0.456, 0.406]
@@ -158,10 +179,11 @@ def export_onnx(model, output_path: Path, img_size: int = 224, device: str = "cp
     dummy = torch.randn(1, 3, img_size, img_size, device=device)
     torch.onnx.export(
         model, dummy, str(output_path),
-        opset_version=13,
+        opset_version=18,
         input_names=["input"],
         output_names=["weight_kg"],
         dynamic_axes={"input": {0: "batch"}, "weight_kg": {0: "batch"}},
+        dynamo=False,
     )
     print(f"[OK] ONNX 已导出: {output_path}")
 
@@ -172,6 +194,10 @@ def export_onnx(model, output_path: Path, img_size: int = 224, device: str = "cp
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, default="./PIGRGB-Weight/RGB_9579")
+    parser.add_argument("--train_csv", type=str, default=None,
+                        help="prepare_pigrgb_weight.py 生成的 train.csv (优先于 --data_root)")
+    parser.add_argument("--val_csv", type=str, default=None,
+                        help="prepare_pigrgb_weight.py 生成的 val.csv (优先于 --data_root)")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -186,8 +212,10 @@ def main():
     print(f"[Run dir] {run_dir}")
     print(f"[Device] {args.device}")
 
-    train_set = PigWeightDataset(args.data_root, "train", args.img_size)
-    val_set = PigWeightDataset(args.data_root, "val", args.img_size)
+    train_set = PigWeightDataset(args.data_root, "train", args.img_size,
+                                 csv_path=args.train_csv)
+    val_set = PigWeightDataset(args.data_root, "val", args.img_size,
+                               csv_path=args.val_csv)
 
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
                               num_workers=args.num_workers, pin_memory=True)
@@ -213,7 +241,7 @@ def main():
         if val_mae < best_mae:
             best_mae = val_mae
             torch.save(model.state_dict(), run_dir / "best.pt")
-            print(f"  ↳ new best, saved -> {run_dir / 'best.pt'}")
+            print(f"  -> new best, saved -> {run_dir / 'best.pt'}")
 
     (run_dir / "metrics.json").write_text(json.dumps(history, indent=2))
 
