@@ -1,0 +1,39 @@
+TrackID,IsValid,Reason,FirstFrame,FirstTime(s),LastFrame,LastTime(s),Duration(s),ZoneHistory,StateChanges
+1,True,Valid Sequence,0,0.00,307,10.23,10.23,ENTRY->WAIT->OUT,1.23s: ENTRY->WAIT; 2.93s: WAIT->OUT
+2,True,Valid Sequence,0,0.00,311,10.37,10.37,ENTRY->WAIT->OUT,3.13s: ENTRY->WAIT; 4.37s: WAIT->OUT
+3,True,Valid Sequence,0,0.00,404,13.47,13.47,ENTRY->WAIT->OUT,4.30s: ENTRY->WAIT; 4.97s: WAIT->OUT
+4,True,Valid Sequence,0,0.00,319,10.63,10.63,ENTRY->WAIT->OUT,1.97s: ENTRY->WAIT; 3.93s: WAIT->OUT
+5,True,Valid Sequence,0,0.00,309,10.30,10.30,ENTRY->WAIT->OUT,3.20s: ENTRY->WAIT; 3.97s: WAIT->OUT
+6,True,Valid Sequence,0,0.00,326,10.87,10.87,ENTRY->WAIT->OUT,0.97s: ENTRY->WAIT; 2.73s: WAIT->OUT
+7,True,Valid Sequence,0,0.00,309,10.30,10.30,ENTRY->WAIT->OUT,2.10s: ENTRY->WAIT; 4.07s: WAIT->OUT
+8,True,Valid Sequence,0,0.00,404,13.47,13.47,ENTRY->WAIT->OUT,1.47s: ENTRY->WAIT; 3.20s: WAIT->OUT
+9,True,Valid Sequence,0,0.00,310,10.33,10.33,ENTRY->WAIT->OUT,1.77s: ENTRY->WAIT; 4.10s: WAIT->OUT
+10,True,Valid Sequence,0,0.00,339,11.30,11.30,ENTRY->WAIT->OUT,1.77s: ENTRY->WAIT; 3.53s: WAIT->OUT
+11,True,Valid Sequence,0,0.00,309,10.30,10.30,ENTRY->WAIT->OUT,1.90s: ENTRY->WAIT; 3.07s: WAIT->OUT
+12,True,Valid Sequence,0,0.00,404,13.47,13.47,ENTRY->WAIT->OUT,1.73s: ENTRY->WAIT; 4.20s: WAIT->OUT
+13,True,Valid Sequence,0,0.00,342,11.40,11.40,ENTRY->WAIT->OUT,3.93s: ENTRY->WAIT; 4.53s: WAIT->OUT
+14,False,Ghost (Started in OUT),0,0.00,3,0.10,0.10,OUT,
+15,False,Ghost (Started in OUT),0,0.00,3,0.10,0.10,OUT,
+16,False,Ghost (Started in OUT),25,0.83,27,0.90,0.07,OUT,
+17,False,Ghost (Started in OUT),38,1.27,51,1.70,0.43,OUT,
+18,False,Ghost (Started in OUT),38,1.27,39,1.30,0.03,OUT,
+19,False,Ghost (Started in OUT),53,1.77,54,1.80,0.03,OUT,
+20,False,Ghost (Started in OUT),56,1.87,78,2.60,0.73,OUT,
+21,False,Ghost (Started in OUT),62,2.07,100,3.33,1.27,OUT,
+22,False,Ghost (Started in OUT),62,2.07,63,2.10,0.03,OUT,
+23,False,Ghost (Started in OUT),78,2.60,93,3.10,0.50,OUT,
+27,False,Ghost (Started in OUT),100,3.33,100,3.33,0.00,OUT,
+28,False,Turned Back,136,4.53,136,4.53,0.00,ENTRY,
+29,False,Ghost (Started in OUT),230,7.67,307,10.23,2.57,OUT,
+31,False,Ghost (Started in OUT),279,9.30,404,13.47,4.17,OUT,
+32,False,Ghost (Started in OUT),281,9.37,336,11.20,1.83,OUT,
+33,False,Ghost (Started in OUT),319,10.63,331,11.03,0.40,OUT,
+35,False,Ghost (Started in OUT),330,11.00,333,11.10,0.10,OUT->WAIT,11.10s: OUT->WAIT
+36,False,Ghost (Started in OUT),330,11.00,365,12.17,1.17,OUT,
+37,False,Ghost (Started in OUT),335,11.17,404,13.47,2.30,OUT,
+38,False,Ghost (Started in OUT),343,11.43,404,13.47,2.03,OUT,
+39,False,Ghost (Started in OUT),348,11.60,404,13.47,1.87,OUT,
+40,False,Ghost (Started in WAIT),352,11.73,354,11.80,0.07,WAIT,
+41,False,Ghost (Started in WAIT),365,12.17,374,12.47,0.30,WAIT,
+42,False,Ghost (Started in OUT),382,12.73,404,13.47,0.73,OUT,
+43,False,Ghost (Started in WAIT),385,12.83,404,13.47,0.63,WAIT->OUT,12.87s: WAIT->OUT

@@ -1,0 +1,4 @@
+video,actual,total_line,valid_traj,error_line,paper_actual,paper_count,paper_error,paper_correct,review_status,reviewed,needs_review,review_note,review_tags,elapsed
+1.mp4,,2184,2188,,,2184,,,no_ground_truth,0,0,,,600.9
+2.mp4,,568,565,,,568,,,no_ground_truth,0,0,,,157.0
+3.mp4,,979,975,,,979,,,no_ground_truth,0,0,,,245.3

@@ -1,0 +1,189 @@
+======================================================================
+Tracker: ByteTrack
+======================================================================
+
+ID 1: ✅ VALID (Valid Sequence)
+  首次出现: Frame 8 (0.27s)
+  最后出现: Frame 390 (13.00s)
+  持续时间: 12.73s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [8.07s] Frame 242: ENTRY -> WAIT
+    [8.90s] Frame 267: WAIT -> OUT
+  移动距离: 1109.3 px
+  平均速度: 87.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 2: ✅ VALID (Valid Sequence)
+  首次出现: Frame 16 (0.53s)
+  最后出现: Frame 337 (11.23s)
+  持续时间: 10.70s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.33s] Frame 70: ENTRY -> WAIT
+    [4.43s] Frame 133: WAIT -> OUT
+  移动距离: 998.0 px
+  平均速度: 93.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 7
+  恢复次数: 1
+
+ID 3: ✅ VALID (Valid Sequence)
+  首次出现: Frame 28 (0.93s)
+  最后出现: Frame 335 (11.17s)
+  持续时间: 10.23s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.80s] Frame 114: ENTRY -> WAIT
+    [5.60s] Frame 168: WAIT -> OUT
+  移动距离: 983.3 px
+  平均速度: 96.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 4: ✅ VALID (Valid Sequence)
+  首次出现: Frame 38 (1.27s)
+  最后出现: Frame 362 (12.07s)
+  持续时间: 10.80s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.40s] Frame 192: ENTRY -> WAIT
+    [6.97s] Frame 209: WAIT -> OUT
+  移动距离: 984.8 px
+  平均速度: 91.2 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 5: ❌ INVALID (Jumped Over)
+  首次出现: Frame 62 (2.07s)
+  最后出现: Frame 334 (11.13s)
+  持续时间: 9.07s
+  区域路径: ENTRY -> WAIT -> OUT -> WAIT -> ENTRY
+  状态变化:
+    [5.77s] Frame 173: ENTRY -> WAIT
+    [6.47s] Frame 194: WAIT -> OUT
+    [9.33s] Frame 280: OUT -> WAIT
+    [9.93s] Frame 298: WAIT -> ENTRY
+  移动距离: 1269.1 px
+  平均速度: 140.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 6: ✅ VALID (Valid Sequence)
+  首次出现: Frame 73 (2.43s)
+  最后出现: Frame 358 (11.93s)
+  持续时间: 9.50s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.67s] Frame 200: ENTRY -> WAIT
+    [7.40s] Frame 222: WAIT -> OUT
+  移动距离: 949.8 px
+  平均速度: 100.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 7: ❌ INVALID (Jumped Over)
+  首次出现: Frame 92 (3.07s)
+  最后出现: Frame 426 (14.20s)
+  持续时间: 11.13s
+  区域路径: ENTRY -> WAIT -> OUT -> WAIT -> OUT -> WAIT -> ENTRY
+  状态变化:
+    [6.30s] Frame 189: ENTRY -> WAIT
+    [7.27s] Frame 218: WAIT -> OUT
+    [8.47s] Frame 254: OUT -> WAIT
+    [11.20s] Frame 336: WAIT -> OUT
+    [12.30s] Frame 369: OUT -> WAIT
+    [13.17s] Frame 395: WAIT -> ENTRY
+  移动距离: 1440.4 px
+  平均速度: 129.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 8: ✅ VALID (Valid Sequence)
+  首次出现: Frame 95 (3.17s)
+  最后出现: Frame 476 (15.87s)
+  持续时间: 12.70s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [7.23s] Frame 217: ENTRY -> WAIT
+    [8.20s] Frame 246: WAIT -> OUT
+  移动距离: 953.8 px
+  平均速度: 75.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 9: ✅ VALID (Valid Sequence)
+  首次出现: Frame 150 (5.00s)
+  最后出现: Frame 411 (13.70s)
+  持续时间: 8.70s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.20s] Frame 186: ENTRY -> WAIT
+    [6.80s] Frame 204: WAIT -> OUT
+  移动距离: 968.4 px
+  平均速度: 111.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 10: ❌ INVALID (Turned Back)
+  首次出现: Frame 207 (6.90s)
+  最后出现: Frame 343 (11.43s)
+  持续时间: 4.53s
+  区域路径: ENTRY
+  移动距离: 392.8 px
+  平均速度: 86.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 11: ❌ INVALID (Turned Back)
+  首次出现: Frame 227 (7.57s)
+  最后出现: Frame 364 (12.13s)
+  持续时间: 4.57s
+  区域路径: ENTRY
+  移动距离: 150.4 px
+  平均速度: 32.9 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 12: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 347 (11.57s)
+  最后出现: Frame 354 (11.80s)
+  持续时间: 0.23s
+  区域路径: OUT
+  移动距离: 21.6 px
+  平均速度: 92.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 13: ❌ INVALID (Turned Back)
+  首次出现: Frame 413 (13.77s)
+  最后出现: Frame 431 (14.37s)
+  持续时间: 0.60s
+  区域路径: ENTRY
+  移动距离: 22.1 px
+  平均速度: 36.8 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+======================================================================
+Line 0 穿越次数: 7
+Line 1 穿越次数: 7
+Line 2 穿越次数: 7
+三线平均 (raw): 7.00
+TOTAL COUNT: 7
+TOTAL VALID (轨迹验证): 7
+TOTAL IDs: 13
+======================================================================

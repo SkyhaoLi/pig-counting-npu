@@ -1,0 +1,195 @@
+======================================================================
+Tracker: ByteTrack
+======================================================================
+
+ID 1: ✅ VALID (Valid Sequence)
+  首次出现: Frame 23 (0.77s)
+  最后出现: Frame 306 (10.20s)
+  持续时间: 9.43s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.53s] Frame 46: ENTRY -> WAIT
+    [2.10s] Frame 63: WAIT -> OUT
+  移动距离: 1347.4 px
+  平均速度: 142.8 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 2: ✅ VALID (Valid Sequence)
+  首次出现: Frame 30 (1.00s)
+  最后出现: Frame 306 (10.20s)
+  持续时间: 9.20s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.83s] Frame 55: ENTRY -> WAIT
+    [2.53s] Frame 76: WAIT -> OUT
+  移动距离: 1438.3 px
+  平均速度: 156.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 12
+  恢复次数: 3
+
+ID 3: ✅ VALID (Valid Sequence)
+  首次出现: Frame 52 (1.73s)
+  最后出现: Frame 288 (9.60s)
+  持续时间: 7.87s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.13s] Frame 94: ENTRY -> WAIT
+    [4.07s] Frame 122: WAIT -> OUT
+  移动距离: 1348.4 px
+  平均速度: 171.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 3
+  恢复次数: 1
+
+ID 4: ✅ VALID (Valid Sequence)
+  首次出现: Frame 103 (3.43s)
+  最后出现: Frame 316 (10.53s)
+  持续时间: 7.10s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [4.50s] Frame 135: ENTRY -> WAIT
+    [5.40s] Frame 162: WAIT -> OUT
+  移动距离: 1383.7 px
+  平均速度: 194.9 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 5: ✅ VALID (Valid Sequence)
+  首次出现: Frame 104 (3.47s)
+  最后出现: Frame 274 (9.13s)
+  持续时间: 5.67s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [4.83s] Frame 145: ENTRY -> WAIT
+    [7.17s] Frame 215: WAIT -> OUT
+  移动距离: 1367.9 px
+  平均速度: 241.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 1
+  恢复次数: 1
+
+ID 6: ✅ VALID (Valid Sequence)
+  首次出现: Frame 117 (3.90s)
+  最后出现: Frame 284 (9.47s)
+  持续时间: 5.57s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [5.23s] Frame 157: ENTRY -> WAIT
+    [7.37s] Frame 221: WAIT -> OUT
+  移动距离: 1266.6 px
+  平均速度: 227.5 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 7: ✅ VALID (Valid Sequence)
+  首次出现: Frame 119 (3.97s)
+  最后出现: Frame 284 (9.47s)
+  持续时间: 5.50s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [5.03s] Frame 151: ENTRY -> WAIT
+    [5.70s] Frame 171: WAIT -> OUT
+  移动距离: 1292.9 px
+  平均速度: 235.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 2
+  恢复次数: 1
+
+ID 8: ✅ VALID (Valid Sequence)
+  首次出现: Frame 120 (4.00s)
+  最后出现: Frame 277 (9.23s)
+  持续时间: 5.23s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [4.73s] Frame 142: ENTRY -> WAIT
+    [5.13s] Frame 154: WAIT -> OUT
+  移动距离: 1336.0 px
+  平均速度: 255.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 9: ✅ VALID (Valid Sequence)
+  首次出现: Frame 127 (4.23s)
+  最后出现: Frame 321 (10.70s)
+  持续时间: 6.47s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [7.90s] Frame 237: ENTRY -> WAIT
+    [8.73s] Frame 262: WAIT -> OUT
+  移动距离: 1328.6 px
+  平均速度: 205.5 px/s
+  平均置信度: 0.00
+  丢失帧数: 6
+  恢复次数: 1
+
+ID 10: ✅ VALID (Valid Sequence)
+  首次出现: Frame 149 (4.97s)
+  最后出现: Frame 321 (10.70s)
+  持续时间: 5.73s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [8.23s] Frame 247: ENTRY -> WAIT
+    [8.97s] Frame 269: WAIT -> OUT
+  移动距离: 1296.8 px
+  平均速度: 226.2 px/s
+  平均置信度: 0.00
+  丢失帧数: 6
+  恢复次数: 2
+
+ID 11: ✅ VALID (Valid Sequence)
+  首次出现: Frame 175 (5.83s)
+  最后出现: Frame 322 (10.73s)
+  持续时间: 4.90s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [8.10s] Frame 243: ENTRY -> WAIT
+    [8.67s] Frame 260: WAIT -> OUT
+  移动距离: 1314.2 px
+  平均速度: 268.2 px/s
+  平均置信度: 0.00
+  丢失帧数: 1
+  恢复次数: 1
+
+ID 12: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 239 (7.97s)
+  最后出现: Frame 322 (10.73s)
+  持续时间: 2.77s
+  区域路径: OUT
+  移动距离: 370.0 px
+  平均速度: 133.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 13: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 241 (8.03s)
+  最后出现: Frame 307 (10.23s)
+  持续时间: 2.20s
+  区域路径: OUT
+  移动距离: 259.2 px
+  平均速度: 117.8 px/s
+  平均置信度: 0.00
+  丢失帧数: 4
+  恢复次数: 1
+
+ID 14: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 264 (8.80s)
+  最后出现: Frame 314 (10.47s)
+  持续时间: 1.67s
+  区域路径: OUT
+  移动距离: 122.1 px
+  平均速度: 73.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 1
+  恢复次数: 1
+
+======================================================================
+TOTAL VALID: 11
+TOTAL IDs: 14
+======================================================================

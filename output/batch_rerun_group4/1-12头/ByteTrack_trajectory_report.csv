@@ -1,0 +1,14 @@
+TrackID,IsValid,Reason,FirstFrame,FirstTime(s),LastFrame,LastTime(s),Duration(s),ZoneHistory,StateChanges
+1,True,Valid Sequence,14,0.47,79,2.63,2.17,ENTRY->WAIT->OUT,1.13s: ENTRY->WAIT; 1.50s: WAIT->OUT
+2,True,Valid Sequence,25,0.83,106,3.53,2.70,ENTRY->WAIT->OUT,1.60s: ENTRY->WAIT; 2.23s: WAIT->OUT
+3,True,Valid Sequence,33,1.10,117,3.90,2.80,ENTRY->WAIT->OUT,1.93s: ENTRY->WAIT; 2.67s: WAIT->OUT
+4,True,Valid Sequence,36,1.20,119,3.97,2.77,ENTRY->WAIT->OUT,2.23s: ENTRY->WAIT; 2.87s: WAIT->OUT
+5,True,Valid Sequence,44,1.47,119,3.97,2.50,ENTRY->WAIT->OUT,2.37s: ENTRY->WAIT; 2.93s: WAIT->OUT
+6,True,Valid Sequence,48,1.60,127,4.23,2.63,ENTRY->WAIT->OUT,2.50s: ENTRY->WAIT; 3.00s: WAIT->OUT
+7,True,Valid Sequence,48,1.60,147,4.90,3.30,ENTRY->WAIT->OUT,2.53s: ENTRY->WAIT; 3.23s: WAIT->OUT
+8,True,Valid Sequence,50,1.67,138,4.60,2.93,ENTRY->WAIT->OUT,2.40s: ENTRY->WAIT; 2.93s: WAIT->OUT
+9,True,Valid Sequence,53,1.77,166,5.53,3.77,ENTRY->WAIT->OUT,2.60s: ENTRY->WAIT; 3.30s: WAIT->OUT
+10,True,Valid Sequence,64,2.13,159,5.30,3.17,ENTRY->WAIT->OUT,3.07s: ENTRY->WAIT; 3.93s: WAIT->OUT
+11,True,Valid Sequence,65,2.17,170,5.67,3.50,ENTRY->WAIT->OUT,3.03s: ENTRY->WAIT; 3.87s: WAIT->OUT
+12,True,Valid Sequence,71,2.37,175,5.83,3.47,ENTRY->WAIT->OUT,3.40s: ENTRY->WAIT; 4.13s: WAIT->OUT
+13,False,Ghost (Started in OUT),140,4.67,143,4.77,0.10,OUT,

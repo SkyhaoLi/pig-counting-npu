@@ -1,0 +1,6 @@
+TrackID,IsValid,Reason,FirstFrame,FirstTime(s),LastFrame,LastTime(s),Duration(s),ZoneHistory,StateChanges
+1,True,Valid Sequence,19,0.63,77,2.57,1.93,ENTRY->WAIT->OUT,1.27s: ENTRY->WAIT; 1.73s: WAIT->OUT
+2,True,Valid Sequence,35,1.17,80,2.67,1.50,ENTRY->WAIT->OUT,1.53s: ENTRY->WAIT; 1.80s: WAIT->OUT
+3,True,Valid Sequence,46,1.53,109,3.63,2.10,ENTRY->WAIT->OUT,2.07s: ENTRY->WAIT; 2.40s: WAIT->OUT
+4,True,Valid Sequence,64,2.13,122,4.07,1.93,ENTRY->WAIT->OUT,2.67s: ENTRY->WAIT; 3.07s: WAIT->OUT
+5,True,Valid Sequence,70,2.33,138,4.60,2.27,ENTRY->WAIT->OUT,2.80s: ENTRY->WAIT; 3.20s: WAIT->OUT

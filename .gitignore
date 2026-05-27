@@ -1,9 +1,13 @@
 # Large files
-output/
 *.mp4
 *.avi
 *.mov
 *.mkv
+
+# Output: keep reports, ignore embedded tools
+output/doc/docx_tools/
+output/doc/_fix_one_para_tmp/
+output_web/uploads/
 
 # Model weights
 weights/

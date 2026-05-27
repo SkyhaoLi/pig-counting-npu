@@ -1,0 +1,113 @@
+{
+  "video": "17-37头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\17-37头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\17-37头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\17-37头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\17-37头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\17-37头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 32,
+    "line1": 32,
+    "line2": 31,
+    "avg_raw": 31.67,
+    "total_line": 32,
+    "valid_traj": 30,
+    "total_ids": 44
+  },
+  "actual": 37,
+  "paper_actual": 31,
+  "raw_error": -5,
+  "paper_error": 1,
+  "primary_cause": "标签定义与统计方向不一致",
+  "secondary_causes": [
+    "反向进入目标或非统计方向目标混入",
+    "遮挡或重分配ID导致重复计数",
+    "入口区停留或折返导致计数波动",
+    "线计数与轨迹验证结果存在偏差"
+  ],
+  "evidence": [
+    "文件名真实值 37 与人工复核真实值 31 不一致，说明原始标签包含非统计方向目标。",
+    "Ghost(Started in OUT) 轨迹 9 个，前 3 秒在 OUT 区新生 ID 4 个。",
+    "高恢复轨迹 10 个，高丢失轨迹 11 个。",
+    "Retried 轨迹 2 个，Stuck in Wait 轨迹 2 个。",
+    "total_line=32, valid_traj=30, gap=2。"
+  ],
+  "invalid_reason_counts": {
+    "Ghost (Started in OUT)": 9,
+    "Valid (Retried)": 2,
+    "Valid Sequence": 28,
+    "Stuck in Wait": 2,
+    "Ghost (Started in WAIT)": 3
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 0.0,
+      "end_s": 12.27,
+      "tracks": [
+        1,
+        5,
+        19,
+        29,
+        35,
+        38,
+        39,
+        41,
+        48
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 0.9299999999999999,
+      "end_s": 12.37,
+      "tracks": [
+        10,
+        13,
+        14,
+        27,
+        29,
+        31,
+        32,
+        40,
+        41,
+        45
+      ]
+    },
+    {
+      "label": "停留/折返风险",
+      "start_s": 0.0,
+      "end_s": 11.97,
+      "tracks": [
+        2,
+        32
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    1,
+    2,
+    5,
+    10,
+    13,
+    14,
+    19,
+    21,
+    27,
+    29,
+    31,
+    32,
+    35,
+    38,
+    39,
+    40,
+    41,
+    43,
+    44,
+    45,
+    47,
+    48
+  ],
+  "diagnosis_confidence": 0.95
+}

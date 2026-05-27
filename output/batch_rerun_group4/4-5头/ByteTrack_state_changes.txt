@@ -1,0 +1,100 @@
+======================================================================
+Tracker: ByteTrack
+======================================================================
+
+ID 1: ✅ VALID (Valid Sequence)
+  首次出现: Frame 8 (0.27s)
+  最后出现: Frame 143 (4.77s)
+  持续时间: 4.50s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.33s] Frame 70: ENTRY -> WAIT
+    [2.90s] Frame 87: WAIT -> OUT
+  移动距离: 841.2 px
+  平均速度: 186.9 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 2: ✅ VALID (Valid Sequence)
+  首次出现: Frame 53 (1.77s)
+  最后出现: Frame 150 (5.00s)
+  持续时间: 3.23s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.77s] Frame 83: ENTRY -> WAIT
+    [3.27s] Frame 98: WAIT -> OUT
+  移动距离: 836.3 px
+  平均速度: 258.6 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 3: ✅ VALID (Valid Sequence)
+  首次出现: Frame 58 (1.93s)
+  最后出现: Frame 150 (5.00s)
+  持续时间: 3.07s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.87s] Frame 86: ENTRY -> WAIT
+    [3.40s] Frame 102: WAIT -> OUT
+  移动距离: 823.2 px
+  平均速度: 268.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 4: ✅ VALID (Valid Sequence)
+  首次出现: Frame 62 (2.07s)
+  最后出现: Frame 151 (5.03s)
+  持续时间: 2.97s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.10s] Frame 93: ENTRY -> WAIT
+    [3.63s] Frame 109: WAIT -> OUT
+  移动距离: 844.6 px
+  平均速度: 284.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 5: ✅ VALID (Valid Sequence)
+  首次出现: Frame 67 (2.23s)
+  最后出现: Frame 145 (4.83s)
+  持续时间: 2.60s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.10s] Frame 93: ENTRY -> WAIT
+    [3.67s] Frame 110: WAIT -> OUT
+  移动距离: 815.5 px
+  平均速度: 313.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 6: ❌ INVALID (Turned Back)
+  首次出现: Frame 73 (2.43s)
+  最后出现: Frame 73 (2.43s)
+  持续时间: 0.00s
+  区域路径: ENTRY
+  移动距离: 0.0 px
+  平均速度: 0.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 7: ❌ INVALID (Ghost (Started in WAIT))
+  首次出现: Frame 113 (3.77s)
+  最后出现: Frame 113 (3.77s)
+  持续时间: 0.00s
+  区域路径: WAIT
+  移动距离: 0.0 px
+  平均速度: 0.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+======================================================================
+TOTAL VALID: 5
+TOTAL IDs: 7
+======================================================================

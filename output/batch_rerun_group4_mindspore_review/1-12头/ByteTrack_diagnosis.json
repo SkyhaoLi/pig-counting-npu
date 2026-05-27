@@ -1,0 +1,34 @@
+{
+  "video": "1-12头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\1-12头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\1-12头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\1-12头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\1-12头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\1-12头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 12,
+    "line1": 12,
+    "line2": 12,
+    "avg_raw": 12.0,
+    "total_line": 12,
+    "valid_traj": 12,
+    "total_ids": 12
+  },
+  "actual": 12,
+  "paper_actual": 12,
+  "raw_error": 0,
+  "paper_error": 0,
+  "primary_cause": "未发现明显结构性问题",
+  "secondary_causes": [],
+  "evidence": [
+    "当前导出物中未出现足够强的异常模式。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 12
+  },
+  "suspect_windows": [],
+  "suspicious_track_ids": [],
+  "diagnosis_confidence": 0.58
+}

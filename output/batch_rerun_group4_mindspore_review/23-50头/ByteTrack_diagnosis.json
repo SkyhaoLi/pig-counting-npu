@@ -1,0 +1,81 @@
+{
+  "video": "23-50头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\23-50头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\23-50头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\23-50头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\23-50头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\23-50头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 50,
+    "line1": 50,
+    "line2": 50,
+    "avg_raw": 50.0,
+    "total_line": 50,
+    "valid_traj": 50,
+    "total_ids": 58
+  },
+  "actual": 50,
+  "paper_actual": 50,
+  "raw_error": 0,
+  "paper_error": 0,
+  "primary_cause": "反向进入目标或非统计方向目标混入",
+  "secondary_causes": [
+    "遮挡或重分配ID导致重复计数"
+  ],
+  "evidence": [
+    "Ghost(Started in OUT) 轨迹 7 个，前 3 秒在 OUT 区新生 ID 3 个。",
+    "高恢复轨迹 6 个，高丢失轨迹 4 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 50,
+    "Ghost (Started in OUT)": 7,
+    "Turned Back": 1
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 0.0,
+      "end_s": 9.83,
+      "tracks": [
+        2,
+        3,
+        4,
+        57,
+        58,
+        59,
+        60
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 0.43000000000000005,
+      "end_s": 10.93,
+      "tracks": [
+        5,
+        29,
+        38,
+        43,
+        50,
+        51
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    2,
+    3,
+    4,
+    5,
+    29,
+    38,
+    43,
+    50,
+    51,
+    57,
+    58,
+    59,
+    60
+  ],
+  "diagnosis_confidence": 0.91
+}

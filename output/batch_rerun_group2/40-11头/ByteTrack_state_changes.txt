@@ -1,0 +1,173 @@
+======================================================================
+Tracker: ByteTrack
+======================================================================
+
+ID 1: ✅ VALID (Valid Sequence)
+  首次出现: Frame 19 (0.63s)
+  最后出现: Frame 112 (3.73s)
+  持续时间: 3.10s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.80s] Frame 54: ENTRY -> WAIT
+    [2.40s] Frame 72: WAIT -> OUT
+  移动距离: 1240.1 px
+  平均速度: 400.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 2: ✅ VALID (Valid Sequence)
+  首次出现: Frame 47 (1.57s)
+  最后出现: Frame 129 (4.30s)
+  持续时间: 2.73s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.43s] Frame 73: ENTRY -> WAIT
+    [2.97s] Frame 89: WAIT -> OUT
+  移动距离: 1217.1 px
+  平均速度: 445.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 3: ✅ VALID (Valid Sequence)
+  首次出现: Frame 58 (1.93s)
+  最后出现: Frame 136 (4.53s)
+  持续时间: 2.60s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.13s] Frame 94: ENTRY -> WAIT
+    [3.63s] Frame 109: WAIT -> OUT
+  移动距离: 1230.9 px
+  平均速度: 473.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 4: ✅ VALID (Valid Sequence)
+  首次出现: Frame 63 (2.10s)
+  最后出现: Frame 131 (4.37s)
+  持续时间: 2.27s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.87s] Frame 86: ENTRY -> WAIT
+    [3.27s] Frame 98: WAIT -> OUT
+  移动距离: 1235.1 px
+  平均速度: 544.9 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 5: ✅ VALID (Valid Sequence)
+  首次出现: Frame 84 (2.80s)
+  最后出现: Frame 147 (4.90s)
+  持续时间: 2.10s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.47s] Frame 104: ENTRY -> WAIT
+    [3.90s] Frame 117: WAIT -> OUT
+  移动距离: 1226.5 px
+  平均速度: 584.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 6: ✅ VALID (Valid Sequence)
+  首次出现: Frame 95 (3.17s)
+  最后出现: Frame 221 (7.37s)
+  持续时间: 4.20s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [4.77s] Frame 143: ENTRY -> WAIT
+    [5.47s] Frame 164: WAIT -> OUT
+  移动距离: 1247.0 px
+  平均速度: 296.9 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 7: ✅ VALID (Valid Sequence)
+  首次出现: Frame 95 (3.17s)
+  最后出现: Frame 226 (7.53s)
+  持续时间: 4.37s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [4.50s] Frame 135: ENTRY -> WAIT
+    [5.70s] Frame 171: WAIT -> OUT
+  移动距离: 1285.5 px
+  平均速度: 294.4 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 8: ✅ VALID (Valid Sequence)
+  首次出现: Frame 103 (3.43s)
+  最后出现: Frame 244 (8.13s)
+  持续时间: 4.70s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [5.40s] Frame 162: ENTRY -> WAIT
+    [6.33s] Frame 190: WAIT -> OUT
+  移动距离: 1316.0 px
+  平均速度: 280.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 9: ✅ VALID (Valid Sequence)
+  首次出现: Frame 115 (3.83s)
+  最后出现: Frame 241 (8.03s)
+  持续时间: 4.20s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.30s] Frame 189: ENTRY -> WAIT
+    [7.33s] Frame 220: WAIT -> OUT
+  移动距离: 1054.1 px
+  平均速度: 251.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 10: ✅ VALID (Valid Sequence)
+  首次出现: Frame 119 (3.97s)
+  最后出现: Frame 242 (8.07s)
+  持续时间: 4.10s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.13s] Frame 184: ENTRY -> WAIT
+    [7.07s] Frame 212: WAIT -> OUT
+  移动距离: 1161.2 px
+  平均速度: 283.2 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 11: ✅ VALID (Valid Sequence)
+  首次出现: Frame 161 (5.37s)
+  最后出现: Frame 276 (9.20s)
+  持续时间: 3.83s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [6.57s] Frame 197: ENTRY -> WAIT
+    [7.10s] Frame 213: WAIT -> OUT
+  移动距离: 1260.3 px
+  平均速度: 328.8 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 12: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 302 (10.07s)
+  最后出现: Frame 302 (10.07s)
+  持续时间: 0.00s
+  区域路径: OUT
+  移动距离: 0.0 px
+  平均速度: 0.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+======================================================================
+TOTAL VALID: 11
+TOTAL IDs: 12
+======================================================================

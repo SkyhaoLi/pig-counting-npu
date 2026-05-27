@@ -1,0 +1,24 @@
+video,actual,total_line,valid_traj,error_line,paper_actual,paper_count,paper_error,paper_correct,review_status,reviewed,needs_review,review_note,review_tags,elapsed
+1-12头.mp4,12,12,12,0,12,12,0,1,accepted,0,0,,,20.4
+2-7头.mp4,7,7,7,0,7,7,0,1,accepted,0,0,,,47.0
+3-65头.mp4,65,65,65,0,65,65,0,1,accepted,0,0,,,36.6
+4-5头.mp4,5,5,5,0,5,5,0,1,accepted,0,0,,,23.0
+5-58头.mp4,58,59,59,1,58,59,1,0,needs_review,0,1,,,77.9
+6-46头.mp4,46,46,46,0,46,46,0,1,accepted,0,0,,,31.8
+7-30头.mp4,30,30,29,0,30,30,0,1,accepted,0,0,,,82.1
+8-22头.mp4,22,22,22,0,22,22,0,1,accepted,0,0,,,37.3
+9-57头.mp4,57,57,57,0,57,57,0,1,accepted,0,0,,,39.0
+10-48头.mp4,48,48,46,0,48,48,0,1,accepted,0,0,,,31.0
+11.mp4,,73,73,,,73,,,no_ground_truth,0,0,,,51.5
+12-29头.mp4,29,29,29,0,29,29,0,1,accepted,0,0,,,31.4
+13-9头.mp4,9,9,9,0,9,9,0,1,accepted,0,0,,,26.5
+14-35头.mp4,35,35,34,0,35,35,0,1,accepted,0,0,,,59.6
+15-47头.mp4,47,46,46,-1,47,46,-1,0,needs_review,0,1,,,51.8
+16.mp4,,87,86,,,87,,,no_ground_truth,0,0,,,60.9
+17-37头.mp4,37,32,30,-5,31,32,1,0,human_reviewed,1,0,Six reverse-direction entrants at the start are excluded from the forward-flow total; one occlusion-induced re-ID adds one extra count.,ground_truth_corrected|reverse_direction_entry|id_switch,41.8
+18.mp4,,106,106,,,106,,,no_ground_truth,0,0,,,66.6
+19.mp4,,114,114,,,114,,,no_ground_truth,0,0,,,45.2
+20.mp4,,82,82,,,82,,,no_ground_truth,0,0,,,41.6
+21-84头.mp4,84,84,84,0,84,84,0,1,accepted,0,0,,,85.1
+22-13头.mp4,13,12,13,-1,13,12,-1,0,needs_review,0,1,,,41.8
+23-50头.mp4,50,50,50,0,50,50,0,1,accepted,0,0,,,35.7

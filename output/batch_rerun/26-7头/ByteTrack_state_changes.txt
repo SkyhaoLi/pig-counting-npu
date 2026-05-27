@@ -1,0 +1,117 @@
+======================================================================
+Tracker: ByteTrack
+======================================================================
+
+ID 1: ✅ VALID (Valid Sequence)
+  首次出现: Frame 8 (0.27s)
+  最后出现: Frame 134 (4.47s)
+  持续时间: 4.20s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.13s] Frame 34: ENTRY -> WAIT
+    [1.97s] Frame 59: WAIT -> OUT
+  移动距离: 1231.4 px
+  平均速度: 293.2 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 2: ✅ VALID (Valid Sequence)
+  首次出现: Frame 17 (0.57s)
+  最后出现: Frame 136 (4.53s)
+  持续时间: 3.97s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.57s] Frame 47: ENTRY -> WAIT
+    [2.13s] Frame 64: WAIT -> OUT
+  移动距离: 1241.4 px
+  平均速度: 313.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 3: ✅ VALID (Valid Sequence)
+  首次出现: Frame 18 (0.60s)
+  最后出现: Frame 152 (5.07s)
+  持续时间: 4.47s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [1.57s] Frame 47: ENTRY -> WAIT
+    [4.17s] Frame 125: WAIT -> OUT
+  移动距离: 1290.8 px
+  平均速度: 289.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 4: ✅ VALID (Valid Sequence)
+  首次出现: Frame 54 (1.80s)
+  最后出现: Frame 147 (4.90s)
+  持续时间: 3.10s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.17s] Frame 95: ENTRY -> WAIT
+    [3.67s] Frame 110: WAIT -> OUT
+  移动距离: 1296.6 px
+  平均速度: 418.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 5: ✅ VALID (Valid Sequence)
+  首次出现: Frame 62 (2.07s)
+  最后出现: Frame 142 (4.73s)
+  持续时间: 2.67s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.90s] Frame 87: ENTRY -> WAIT
+    [3.67s] Frame 110: WAIT -> OUT
+  移动距离: 1217.9 px
+  平均速度: 456.7 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 6: ✅ VALID (Valid Sequence)
+  首次出现: Frame 67 (2.23s)
+  最后出现: Frame 146 (4.87s)
+  持续时间: 2.63s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [2.97s] Frame 89: ENTRY -> WAIT
+    [3.90s] Frame 117: WAIT -> OUT
+  移动距离: 1249.0 px
+  平均速度: 474.3 px/s
+  平均置信度: 0.00
+  丢失帧数: 3
+  恢复次数: 2
+
+ID 7: ✅ VALID (Valid Sequence)
+  首次出现: Frame 84 (2.80s)
+  最后出现: Frame 151 (5.03s)
+  持续时间: 2.23s
+  区域路径: ENTRY -> WAIT -> OUT
+  状态变化:
+    [3.33s] Frame 100: ENTRY -> WAIT
+    [3.83s] Frame 115: WAIT -> OUT
+  移动距离: 1246.4 px
+  平均速度: 558.1 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+ID 8: ❌ INVALID (Ghost (Started in OUT))
+  首次出现: Frame 202 (6.73s)
+  最后出现: Frame 202 (6.73s)
+  持续时间: 0.00s
+  区域路径: OUT
+  移动距离: 0.0 px
+  平均速度: 0.0 px/s
+  平均置信度: 0.00
+  丢失帧数: 0
+  恢复次数: 0
+
+======================================================================
+TOTAL VALID: 7
+TOTAL IDs: 8
+======================================================================

@@ -1,0 +1,95 @@
+{
+  "video": "22-13头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\22-13头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\22-13头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\22-13头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\22-13头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\22-13头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 13,
+    "line1": 11,
+    "line2": 12,
+    "avg_raw": 12.0,
+    "total_line": 12,
+    "valid_traj": 13,
+    "total_ids": 37
+  },
+  "actual": 13,
+  "paper_actual": 13,
+  "raw_error": -1,
+  "paper_error": -1,
+  "primary_cause": "反向进入目标或非统计方向目标混入",
+  "secondary_causes": [
+    "遮挡或重分配ID导致重复计数"
+  ],
+  "evidence": [
+    "Ghost(Started in OUT) 轨迹 22 个，前 3 秒在 OUT 区新生 ID 8 个。",
+    "高恢复轨迹 4 个，高丢失轨迹 7 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 12,
+    "Valid (Hesitated)": 1,
+    "Ghost (Started in OUT)": 22,
+    "Turned Back": 1,
+    "Ghost (Started in WAIT)": 1
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 0.0,
+      "end_s": 13.97,
+      "tracks": [
+        14,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        24,
+        25
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 0.0,
+      "end_s": 11.67,
+      "tracks": [
+        12,
+        16,
+        19,
+        27
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    12,
+    14,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    24,
+    25,
+    27,
+    28,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40
+  ],
+  "diagnosis_confidence": 0.91
+}

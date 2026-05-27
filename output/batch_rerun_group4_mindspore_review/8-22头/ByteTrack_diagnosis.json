@@ -1,0 +1,61 @@
+{
+  "video": "8-22头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\8-22头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\8-22头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\8-22头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\8-22头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\8-22头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 21,
+    "line1": 22,
+    "line2": 22,
+    "avg_raw": 21.67,
+    "total_line": 22,
+    "valid_traj": 22,
+    "total_ids": 25
+  },
+  "actual": 22,
+  "paper_actual": 22,
+  "raw_error": 0,
+  "paper_error": 0,
+  "primary_cause": "遮挡或重分配ID导致重复计数",
+  "secondary_causes": [],
+  "evidence": [
+    "高恢复轨迹 2 个，高丢失轨迹 3 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 22,
+    "Ghost (Started in OUT)": 3
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 5.67,
+      "end_s": 12.17,
+      "tracks": [
+        26,
+        27,
+        28
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 0.37,
+      "end_s": 8.469999999999999,
+      "tracks": [
+        11,
+        21
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    11,
+    21,
+    26,
+    27,
+    28
+  ],
+  "diagnosis_confidence": 0.78
+}

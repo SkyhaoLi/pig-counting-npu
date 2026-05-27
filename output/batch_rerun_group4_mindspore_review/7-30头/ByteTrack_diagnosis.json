@@ -1,0 +1,107 @@
+{
+  "video": "7-30头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\7-30头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\7-30头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\7-30头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\7-30头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\7-30头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 30,
+    "line1": 30,
+    "line2": 30,
+    "avg_raw": 30.0,
+    "total_line": 30,
+    "valid_traj": 29,
+    "total_ids": 53
+  },
+  "actual": 30,
+  "paper_actual": 30,
+  "raw_error": 0,
+  "paper_error": 0,
+  "primary_cause": "反向进入目标或非统计方向目标混入",
+  "secondary_causes": [
+    "遮挡或重分配ID导致重复计数",
+    "入口区停留或折返导致计数波动"
+  ],
+  "evidence": [
+    "Ghost(Started in OUT) 轨迹 19 个，前 3 秒在 OUT 区新生 ID 0 个。",
+    "高恢复轨迹 4 个，高丢失轨迹 6 个。",
+    "Retried 轨迹 0 个，Stuck in Wait 轨迹 1 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 27,
+    "Stuck in Wait": 1,
+    "Valid (Hesitated)": 2,
+    "Ghost (Started in WAIT)": 3,
+    "Ghost (Started in OUT)": 19,
+    "Turned Back": 1
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 10.6,
+      "end_s": 29.03,
+      "tracks": [
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 5.27,
+      "end_s": 26.23,
+      "tracks": [
+        18,
+        20,
+        27,
+        40
+      ]
+    },
+    {
+      "label": "停留/折返风险",
+      "start_s": 4.63,
+      "end_s": 9.23,
+      "tracks": [
+        15
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    15,
+    18,
+    20,
+    24,
+    27,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    46,
+    48,
+    50,
+    51,
+    53,
+    54,
+    55
+  ],
+  "diagnosis_confidence": 0.94
+}

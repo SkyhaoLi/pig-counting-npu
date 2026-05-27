@@ -1,0 +1,185 @@
+{
+  "video": "38-75头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group2\\38-75头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group2\\38-75头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group2\\38-75头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group2\\38-75头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group2\\38-75头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 65,
+    "line1": 66,
+    "line2": 66,
+    "total_line": 66,
+    "valid_traj": 74,
+    "total_ids": 84
+  },
+  "actual": 75,
+  "paper_actual": null,
+  "raw_error": -9,
+  "paper_error": null,
+  "primary_cause": "目标反向运动导致线计数被减",
+  "secondary_causes": [
+    "目标在ENTRY区极短时间消失或折返",
+    "反向进入目标或非统计方向目标混入",
+    "遮挡或重分配ID导致重复计数",
+    "线计数与轨迹验证结果存在偏差"
+  ],
+  "evidence": [
+    "检测到 8 个目标计数后反向跑回：ID76在26.6s反向; ID77在28.3s反向; ID78在26.2s反向; ID79在27.6s反向; ID80在28.3s反向。线计数因反向穿越被减去，导致少计约 8 头。",
+    "检测到 1 个目标仅在ENTRY区短暂出现后消失：ID74(仅11.80s)。可能是速度过快/遮挡导致追踪丢失，或真实折返。",
+    "Ghost(Started in OUT) 轨迹 9 个，前 3 秒在 OUT 区新生 ID 0 个。",
+    "高恢复轨迹(>=2次) 4 个，高丢失轨迹(>=5帧) 2 个。",
+    "total_line=66, valid_traj=74, gap=-8。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 74,
+    "Turned Back": 1,
+    "Ghost (Started in OUT)": 9
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 21.8,
+      "end_s": 32.370000000000005,
+      "tracks": [
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 4.1,
+      "end_s": 16.369999999999997,
+      "tracks": [
+        14,
+        24,
+        59,
+        60
+      ]
+    },
+    {
+      "label": "反向运动减计",
+      "start_s": 21.8,
+      "end_s": 31.9,
+      "tracks": [
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        84
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    14,
+    24,
+    59,
+    60,
+    74,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84
+  ],
+  "problem_tracks": [
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        76
+      ],
+      "time_range": "26.6s",
+      "detail": "ID76完成正向穿越后在26.6s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        77
+      ],
+      "time_range": "28.3s",
+      "detail": "ID77完成正向穿越后在28.3s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        78
+      ],
+      "time_range": "26.2s",
+      "detail": "ID78完成正向穿越后在26.2s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        79
+      ],
+      "time_range": "27.6s",
+      "detail": "ID79完成正向穿越后在27.6s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        80
+      ],
+      "time_range": "28.3s",
+      "detail": "ID80完成正向穿越后在28.3s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        81
+      ],
+      "time_range": "26.5s",
+      "detail": "ID81完成正向穿越后在26.5s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        82
+      ],
+      "time_range": "27.3s",
+      "detail": "ID82完成正向穿越后在27.3s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "反向运动减计",
+      "track_ids": [
+        84
+      ],
+      "time_range": "27.4s",
+      "detail": "ID84完成正向穿越后在27.4s反向运动，区域路径: OUT->WAIT->ENTRY",
+      "impact": "少计"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        74
+      ],
+      "time_range": "12.4s - 24.2s",
+      "detail": "ID74仅在ENTRY存在11.80s，丢失帧0，恢复0次",
+      "impact": "少计(若为真实目标)"
+    }
+  ],
+  "diagnosis_confidence": 0.95
+}

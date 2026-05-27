@@ -1,0 +1,23 @@
+TrackID,IsValid,Reason,FirstFrame,FirstTime(s),LastFrame,LastTime(s),Duration(s),ZoneHistory,StateChanges
+1,True,Valid Sequence,8,0.27,390,13.00,12.73,ENTRY->WAIT->OUT,8.07s: ENTRY->WAIT; 8.90s: WAIT->OUT
+2,True,Valid Sequence,16,0.53,337,11.23,10.70,ENTRY->WAIT->OUT,2.33s: ENTRY->WAIT; 4.43s: WAIT->OUT
+3,True,Valid Sequence,28,0.93,335,11.17,10.23,ENTRY->WAIT->OUT,3.80s: ENTRY->WAIT; 5.60s: WAIT->OUT
+4,True,Valid Sequence,38,1.27,362,12.07,10.80,ENTRY->WAIT->OUT,6.40s: ENTRY->WAIT; 6.97s: WAIT->OUT
+5,False,Jumped Over,62,2.07,334,11.13,9.07,ENTRY->WAIT->OUT->WAIT->ENTRY,5.77s: ENTRY->WAIT; 6.47s: WAIT->OUT; 9.33s: OUT->WAIT; 9.93s: WAIT->ENTRY
+6,True,Valid Sequence,73,2.43,358,11.93,9.50,ENTRY->WAIT->OUT,6.67s: ENTRY->WAIT; 7.40s: WAIT->OUT
+7,False,Jumped Over,92,3.07,426,14.20,11.13,ENTRY->WAIT->OUT->WAIT->OUT->WAIT->ENTRY,6.30s: ENTRY->WAIT; 7.27s: WAIT->OUT; 8.47s: OUT->WAIT; 11.20s: WAIT->OUT; 12.30s: OUT->WAIT; 13.17s: WAIT->ENTRY
+8,True,Valid Sequence,95,3.17,476,15.87,12.70,ENTRY->WAIT->OUT,7.23s: ENTRY->WAIT; 8.20s: WAIT->OUT
+9,True,Valid Sequence,150,5.00,411,13.70,8.70,ENTRY->WAIT->OUT,6.20s: ENTRY->WAIT; 6.80s: WAIT->OUT
+10,False,Turned Back,207,6.90,343,11.43,4.53,ENTRY,
+11,False,Turned Back,227,7.57,364,12.13,4.57,ENTRY,
+12,False,Ghost (Started in OUT),347,11.57,354,11.80,0.23,OUT,
+13,False,Turned Back,413,13.77,431,14.37,0.60,ENTRY,
+
+[SUMMARY],,,,,,,,,
+Line0,7,,,,,,,,
+Line1,7,,,,,,,,
+Line2,7,,,,,,,,
+AvgRaw,7.00,,,,,,,,
+TOTAL COUNT,7,,,,,,,,
+TOTAL VALID (轨迹验证),7,,,,,,,,
+TOTAL IDs,13,,,,,,,,

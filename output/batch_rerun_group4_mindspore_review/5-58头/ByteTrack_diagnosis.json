@@ -1,0 +1,76 @@
+{
+  "video": "5-58头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\5-58头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\5-58头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\5-58头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\5-58头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4_mindspore_review\\5-58头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 58,
+    "line1": 59,
+    "line2": 59,
+    "avg_raw": 58.67,
+    "total_line": 59,
+    "valid_traj": 59,
+    "total_ids": 75
+  },
+  "actual": 58,
+  "paper_actual": 58,
+  "raw_error": 1,
+  "paper_error": 1,
+  "primary_cause": "遮挡或重分配ID导致重复计数",
+  "secondary_causes": [
+    "入口区停留或折返导致计数波动"
+  ],
+  "evidence": [
+    "高恢复轨迹 2 个，高丢失轨迹 6 个。",
+    "Retried 轨迹 1 个，Stuck in Wait 轨迹 0 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 58,
+    "Turned Back": 12,
+    "Ghost (Started in WAIT)": 2,
+    "Ghost (Started in OUT)": 2,
+    "Valid (Retried)": 1
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 12.3,
+      "end_s": 18.87,
+      "tracks": [
+        64,
+        70
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 5.07,
+      "end_s": 14.4,
+      "tracks": [
+        4,
+        18
+      ]
+    },
+    {
+      "label": "停留/折返风险",
+      "start_s": 18.03,
+      "end_s": 25.33,
+      "tracks": [
+        72
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    4,
+    18,
+    31,
+    64,
+    65,
+    70,
+    72
+  ],
+  "diagnosis_confidence": 0.91
+}

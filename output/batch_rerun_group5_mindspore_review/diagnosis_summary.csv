@@ -1,0 +1,2 @@
+video,primary_cause,secondary_causes,diagnosis_confidence,diagnosis_window,diagnosis_tracks,diagnosis_json,diagnosis_md
+长视频.mp4,反向进入目标或非统计方向目标混入,遮挡或重分配ID导致重复计数|入口区停留或折返导致计数波动|线计数与轨迹验证结果存在偏差,0.95,反向进入或方向冲突:27.87-1118.70s; 遮挡与ID切换风险:16.53-1112.63s; 停留/折返风险:17.30-1110.23s,6|11|17|21|27|33|45|46|49|54|68|70|73|77|81,C:\Users\Skyha\Desktop\pig_couter\output\batch_rerun_group5_mindspore_review\长视频\ByteTrack_diagnosis.json,C:\Users\Skyha\Desktop\pig_couter\output\batch_rerun_group5_mindspore_review\长视频\ByteTrack_diagnosis.md

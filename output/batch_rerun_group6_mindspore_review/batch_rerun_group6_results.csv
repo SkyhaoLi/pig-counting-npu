@@ -1,0 +1,4 @@
+video,actual,total_line,valid_traj,error_line,paper_actual,paper_count,paper_error,paper_correct,review_status,reviewed,needs_review,review_note,review_tags,elapsed
+1.mp4,,2187,2183,,2189,2187,-2,0,human_reviewed,1,0,Group-6 video 1 ground truth was manually confirmed as 2189.,ground_truth_confirmed|group6,2008.8
+2.mp4,,568,564,,569,568,-1,0,human_reviewed,1,0,Group-6 video 2 ground truth was manually confirmed as 569.,ground_truth_confirmed|group6,582.7
+3.mp4,,981,974,,981,981,0,1,human_reviewed,1,0,Group-6 video 3 ground truth was manually confirmed as 981.,ground_truth_confirmed|group6,916.5

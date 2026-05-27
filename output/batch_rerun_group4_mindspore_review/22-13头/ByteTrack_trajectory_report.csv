@@ -1,0 +1,47 @@
+TrackID,IsValid,Reason,FirstFrame,FirstTime(s),LastFrame,LastTime(s),Duration(s),ZoneHistory,StateChanges
+1,True,Valid Sequence,0,0.00,354,11.80,11.80,ENTRY->WAIT->OUT,1.97s: ENTRY->WAIT; 3.93s: WAIT->OUT
+2,True,Valid Sequence,0,0.00,404,13.47,13.47,ENTRY->WAIT->OUT,1.47s: ENTRY->WAIT; 3.20s: WAIT->OUT
+3,True,Valid Sequence,0,0.00,307,10.23,10.23,ENTRY->WAIT->OUT,1.23s: ENTRY->WAIT; 2.93s: WAIT->OUT
+4,True,Valid Sequence,0,0.00,309,10.30,10.30,ENTRY->WAIT->OUT,3.20s: ENTRY->WAIT; 3.97s: WAIT->OUT
+5,True,Valid Sequence,0,0.00,371,12.37,12.37,ENTRY->WAIT->OUT,2.10s: ENTRY->WAIT; 4.07s: WAIT->OUT
+6,True,Valid (Hesitated),0,0.00,334,11.13,11.13,ENTRY->WAIT->OUT->WAIT,0.97s: ENTRY->WAIT; 2.73s: WAIT->OUT; 11.10s: OUT->WAIT
+7,True,Valid Sequence,0,0.00,338,11.27,11.27,ENTRY->WAIT->OUT,4.30s: ENTRY->WAIT; 4.97s: WAIT->OUT
+8,True,Valid Sequence,0,0.00,245,8.17,8.17,ENTRY->WAIT->OUT,3.13s: ENTRY->WAIT; 4.37s: WAIT->OUT
+9,True,Valid Sequence,0,0.00,308,10.27,10.27,ENTRY->WAIT->OUT,1.77s: ENTRY->WAIT; 4.10s: WAIT->OUT
+10,True,Valid Sequence,0,0.00,311,10.37,10.37,ENTRY->WAIT->OUT,1.90s: ENTRY->WAIT; 3.07s: WAIT->OUT
+11,True,Valid Sequence,0,0.00,342,11.40,11.40,ENTRY->WAIT->OUT,1.77s: ENTRY->WAIT; 3.53s: WAIT->OUT
+12,True,Valid Sequence,0,0.00,335,11.17,11.17,ENTRY->WAIT->OUT,3.93s: ENTRY->WAIT; 4.53s: WAIT->OUT
+13,True,Valid Sequence,0,0.00,404,13.47,13.47,ENTRY->WAIT->OUT,1.73s: ENTRY->WAIT; 4.20s: WAIT->OUT
+14,False,Ghost (Started in OUT),0,0.00,6,0.20,0.20,OUT,
+16,False,Ghost (Started in OUT),25,0.83,51,1.70,0.87,OUT,
+17,False,Ghost (Started in OUT),28,0.93,28,0.93,0.00,OUT,
+18,False,Ghost (Started in OUT),36,1.20,39,1.30,0.10,OUT,
+19,False,Ghost (Started in OUT),53,1.77,76,2.53,0.77,OUT,
+20,False,Ghost (Started in OUT),56,1.87,79,2.63,0.77,OUT,
+21,False,Ghost (Started in OUT),62,2.07,63,2.10,0.03,OUT,
+22,False,Ghost (Started in OUT),77,2.57,78,2.60,0.03,OUT,
+24,False,Ghost (Started in OUT),92,3.07,94,3.13,0.07,OUT,
+25,False,Ghost (Started in OUT),96,3.20,102,3.40,0.20,OUT,
+26,False,Turned Back,134,4.47,136,4.53,0.07,ENTRY,
+27,False,Ghost (Started in OUT),230,7.67,324,10.80,3.13,OUT->WAIT->ENTRY,10.30s: OUT->WAIT; 10.80s: WAIT->ENTRY
+28,False,Ghost (Started in OUT),248,8.27,310,10.33,2.07,OUT,
+30,False,Ghost (Started in OUT),266,8.87,277,9.23,0.37,OUT,
+31,False,Ghost (Started in OUT),272,9.07,404,13.47,4.40,OUT,
+32,False,Ghost (Started in OUT),275,9.17,276,9.20,0.03,OUT,
+33,False,Ghost (Started in OUT),283,9.43,338,11.27,1.83,OUT,
+34,False,Ghost (Started in OUT),336,11.20,404,13.47,2.27,OUT,
+35,False,Ghost (Started in OUT),341,11.37,404,13.47,2.10,OUT,
+36,False,Ghost (Started in WAIT),355,11.83,375,12.50,0.67,WAIT,
+37,False,Ghost (Started in OUT),360,12.00,404,13.47,1.47,OUT,
+38,False,Ghost (Started in OUT),383,12.77,404,13.47,0.70,OUT,
+39,False,Ghost (Started in OUT),385,12.83,404,13.47,0.63,OUT,
+40,False,Ghost (Started in OUT),387,12.90,404,13.47,0.57,OUT,
+
+[SUMMARY],,,,,,,,,
+Line0,13,,,,,,,,
+Line1,11,,,,,,,,
+Line2,12,,,,,,,,
+AvgRaw,12.00,,,,,,,,
+TOTAL COUNT,12,,,,,,,,
+TOTAL VALID (轨迹验证),13,,,,,,,,
+TOTAL IDs,37,,,,,,,,

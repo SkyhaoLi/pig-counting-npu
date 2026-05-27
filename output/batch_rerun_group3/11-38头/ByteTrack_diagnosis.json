@@ -1,0 +1,110 @@
+{
+  "video": "11-38头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group3\\11-38头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group3\\11-38头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group3\\11-38头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group3\\11-38头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group3\\11-38头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 37,
+    "line1": 37,
+    "line2": 37,
+    "total_line": 37,
+    "valid_traj": 37,
+    "total_ids": 40
+  },
+  "actual": 38,
+  "paper_actual": null,
+  "raw_error": -1,
+  "paper_error": null,
+  "primary_cause": "ID丢失后重分配导致多计/少计",
+  "secondary_causes": [
+    "目标在ENTRY区极短时间消失或折返",
+    "遮挡或重分配ID导致重复计数"
+  ],
+  "evidence": [
+    "检测到 1 对疑似ID重分配：ID27(8.9s消失) -> ID40(9.4s出现, 过0条线)。部分新ID仅过部分线导致三线平均偏高。",
+    "检测到 2 个目标仅在ENTRY区短暂出现后消失：ID16(仅5.80s); ID39(仅0.03s)。可能是速度过快/遮挡导致追踪丢失，或真实折返。",
+    "高恢复轨迹(>=2次) 5 个，高丢失轨迹(>=5帧) 8 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 37,
+    "Turned Back": 2,
+    "Ghost (Started in OUT)": 1
+  },
+  "suspect_windows": [
+    {
+      "label": "反向进入或方向冲突",
+      "start_s": 8.9,
+      "end_s": 10.13,
+      "tracks": [
+        40
+      ]
+    },
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 0.0,
+      "end_s": 9.37,
+      "tracks": [
+        2,
+        17,
+        18,
+        19,
+        26
+      ]
+    },
+    {
+      "label": "ID重分配风险",
+      "start_s": 1.6,
+      "end_s": 10.13,
+      "tracks": [
+        27,
+        40
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    2,
+    16,
+    17,
+    18,
+    19,
+    26,
+    27,
+    39,
+    40
+  ],
+  "problem_tracks": [
+    {
+      "type": "ID重分配",
+      "track_ids": [
+        27,
+        40
+      ],
+      "time_range": "8.9s - 9.4s",
+      "detail": "ID27在8.9s消失，ID40在9.4s出现于OUT区，过了0条线",
+      "impact": "少计"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        16
+      ],
+      "time_range": "1.3s - 7.1s",
+      "detail": "ID16仅在ENTRY存在5.80s，丢失帧0，恢复0次",
+      "impact": "少计(若为真实目标)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        39
+      ],
+      "time_range": "5.3s - 5.4s",
+      "detail": "ID39仅在ENTRY存在0.03s，丢失帧0，恢复0次",
+      "impact": "正常折返(极短)"
+    }
+  ],
+  "diagnosis_confidence": 0.94
+}

@@ -1,0 +1,227 @@
+{
+  "video": "15-47头.mp4",
+  "artifacts": {
+    "result_video": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4\\15-47头\\ByteTrack_result.mp4",
+    "events_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4\\15-47头\\ByteTrack_id_events.csv",
+    "state_txt": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4\\15-47头\\ByteTrack_state_changes.txt",
+    "summary_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4\\15-47头\\ByteTrack_summary.csv",
+    "trajectory_csv": "C:\\Users\\Skyha\\Desktop\\pig_couter\\output\\batch_rerun_group4\\15-47头\\ByteTrack_trajectory_report.csv"
+  },
+  "summary": {
+    "line0": 46,
+    "line1": 47,
+    "line2": 46,
+    "total_line": 46,
+    "valid_traj": 46,
+    "total_ids": 56
+  },
+  "actual": 47,
+  "paper_actual": null,
+  "raw_error": -1,
+  "paper_error": null,
+  "primary_cause": "ID丢失后重分配导致多计/少计",
+  "secondary_causes": [
+    "遮挡导致ID碎片化，同一目标多个短命ID均无效",
+    "目标在ENTRY区极短时间消失或折返",
+    "遮挡或重分配ID导致重复计数"
+  ],
+  "evidence": [
+    "检测到 3 对疑似ID重分配：ID47(10.6s消失) -> ID51(11.1s出现, 过0条线); ID54(12.6s消失) -> ID59(13.6s出现, 过0条线); ID54(12.6s消失) -> ID60(13.7s出现, 过2条线)。部分新ID仅过部分线导致三线平均偏高。",
+    "检测到 3 组ID碎片簇：[29,35,36]在6.7s-8.5s; [43,47,51,54]在9.8s-12.6s; [59,60]在13.6s-14.8s。同一时空区域出现多个极短轨迹(Ghost/TurnedBack)，疑似同一目标被反复分配新ID但全部无效导致少计。",
+    "检测到 7 个目标仅在ENTRY区短暂出现后消失：ID27(仅3.57s); ID29(仅0.00s); ID35(仅0.27s); ID36(仅0.10s); ID43(仅0.13s)。可能是速度过快/遮挡导致追踪丢失，或真实折返。",
+    "高恢复轨迹(>=2次) 5 个，高丢失轨迹(>=5帧) 2 个。"
+  ],
+  "invalid_reason_counts": {
+    "Valid Sequence": 46,
+    "Turned Back": 7,
+    "Ghost (Started in WAIT)": 3
+  },
+  "suspect_windows": [
+    {
+      "label": "遮挡与ID切换风险",
+      "start_s": 3.9000000000000004,
+      "end_s": 15.17,
+      "tracks": [
+        20,
+        21,
+        23,
+        33,
+        54
+      ]
+    },
+    {
+      "label": "ID重分配风险",
+      "start_s": 9.9,
+      "end_s": 15.27,
+      "tracks": [
+        47,
+        51,
+        54,
+        59,
+        54,
+        60
+      ]
+    },
+    {
+      "label": "ID碎片化",
+      "start_s": 6.23,
+      "end_s": 15.27,
+      "tracks": [
+        29,
+        35,
+        36,
+        43,
+        47,
+        51,
+        54,
+        59,
+        60
+      ]
+    }
+  ],
+  "suspicious_track_ids": [
+    20,
+    21,
+    23,
+    27,
+    29,
+    33,
+    35,
+    36,
+    43,
+    47,
+    51,
+    54,
+    59,
+    60
+  ],
+  "problem_tracks": [
+    {
+      "type": "ID重分配",
+      "track_ids": [
+        47,
+        51
+      ],
+      "time_range": "10.6s - 11.1s",
+      "detail": "ID47在10.6s消失，ID51在11.1s出现于WAIT区，过了0条线",
+      "impact": "少计"
+    },
+    {
+      "type": "ID重分配",
+      "track_ids": [
+        54,
+        59
+      ],
+      "time_range": "12.6s - 13.6s",
+      "detail": "ID54在12.6s消失，ID59在13.6s出现于WAIT区，过了0条线",
+      "impact": "少计"
+    },
+    {
+      "type": "ID重分配",
+      "track_ids": [
+        54,
+        60
+      ],
+      "time_range": "12.6s - 13.7s",
+      "detail": "ID54在12.6s消失，ID60在13.7s出现于WAIT区，过了2条线",
+      "impact": "多计"
+    },
+    {
+      "type": "ID碎片化",
+      "track_ids": [
+        29,
+        35,
+        36
+      ],
+      "time_range": "6.7s-8.5s",
+      "detail": "ID组[29, 35, 36]在6.7s-8.5s内出现于相近区域，单个持续<0.3s，均为无效轨迹",
+      "impact": "少计"
+    },
+    {
+      "type": "ID碎片化",
+      "track_ids": [
+        43,
+        47,
+        51,
+        54
+      ],
+      "time_range": "9.8s-12.6s",
+      "detail": "ID组[43, 47, 51, 54]在9.8s-12.6s内出现于相近区域，单个持续<0.7s，均为无效轨迹",
+      "impact": "少计"
+    },
+    {
+      "type": "ID碎片化",
+      "track_ids": [
+        59,
+        60
+      ],
+      "time_range": "13.6s-14.8s",
+      "detail": "ID组[59, 60]在13.6s-14.8s内出现于相近区域，单个持续<1.1s，均为无效轨迹",
+      "impact": "少计"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        27
+      ],
+      "time_range": "6.3s - 9.9s",
+      "detail": "ID27仅在ENTRY存在3.57s，丢失帧2，恢复1次",
+      "impact": "少计(若为真实目标)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        29
+      ],
+      "time_range": "6.7s - 6.7s",
+      "detail": "ID29仅在ENTRY存在0.00s，丢失帧0，恢复0次",
+      "impact": "正常折返(极短)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        35
+      ],
+      "time_range": "8.4s - 8.7s",
+      "detail": "ID35仅在ENTRY存在0.27s，丢失帧0，恢复0次",
+      "impact": "正常折返(极短)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        36
+      ],
+      "time_range": "8.4s - 8.5s",
+      "detail": "ID36仅在ENTRY存在0.10s，丢失帧0，恢复0次",
+      "impact": "正常折返(极短)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        43
+      ],
+      "time_range": "9.8s - 10.0s",
+      "detail": "ID43仅在ENTRY存在0.13s，丢失帧0，恢复0次",
+      "impact": "正常折返(极短)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        47
+      ],
+      "time_range": "10.4s - 10.6s",
+      "detail": "ID47仅在ENTRY存在0.17s，丢失帧4，恢复1次",
+      "impact": "正常折返(极短)"
+    },
+    {
+      "type": "ENTRY区快速消失",
+      "track_ids": [
+        54
+      ],
+      "time_range": "11.9s - 12.6s",
+      "detail": "ID54仅在ENTRY存在0.70s，丢失帧4，恢复2次",
+      "impact": "少计(若为真实目标)"
+    }
+  ],
+  "diagnosis_confidence": 0.95
+}
