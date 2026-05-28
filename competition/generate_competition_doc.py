@@ -604,7 +604,7 @@ def build_document():
     add_heading(doc, "7.2 模块化结构(便于评委审阅 GitHub)", level=2)
     structure = (
         "pig_couter/\n"
-        "├── Jin的U盘资料/YOLO_MindSpore/\n"
+        "├── MindSpore/YOLO_MindSpore/\n"
         "│   ├── track_and_count.py            (PC 端主脚本)\n"
         "│   ├── pig_counting_agent.py         (统一 Agent)\n"
         "│   ├── npu_detector.py               (NPU 推理封装)\n"

@@ -17,7 +17,7 @@ import csv
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1] / "Jin的U盘资料" / "YOLO_MindSpore"
+PROJECT_ROOT = Path(__file__).resolve().parents[1] / "MindSpore" / "YOLO_MindSpore"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "trackers"))
 

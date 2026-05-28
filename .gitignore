@@ -22,7 +22,7 @@ datasets/
 test_videos/
 
 # Embedded repos
-Jin的U盘资料/YOLO_MindSpore/mindyolo/
+MindSpore/YOLO_MindSpore/mindyolo/
 
 # Python
 __pycache__/

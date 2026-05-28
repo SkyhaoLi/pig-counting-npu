@@ -29,7 +29,7 @@ RTSP摄像头/视频上传 → 抓帧 → 跳帧优化 → YOLOv8n NPU推理(~33
 - **群体异常检测**：Z-score 体重离群 + 健康阈值告警
 - **可替换模型接口**：`set_weight_model()` / `set_health_model()` 支持训练完成后无缝注入
 
-健康预警代码位于 `Jin的U盘资料/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`，最新改动同步在顶层 `board/health_module.py`（已加入 `set_weight_model()` 注入接口）。
+健康预警代码位于 `MindSpore/YOLO_MindSpore/health_module.py` 与同目录的板端副本 `deploy_atlas/health_module.py`，最新改动同步在顶层 `board/health_module.py`（已加入 `set_weight_model()` 注入接口）。
 
 #### 计算公式（MVP 启发式，无训练）
 
@@ -134,23 +134,24 @@ python competition/training/prepare_pigrgb_weight.py \
 ## 项目结构
 
 ```
-├── Jin的U盘资料/YOLO_MindSpore/
+├── MindSpore/YOLO_MindSpore/       # 原始代码库
 │   ├── track_and_count.py          # PC端计数主脚本 (PyTorch YOLO + ByteTrack)
 │   ├── pig_counting_agent.py       # 统一Agent (监控/诊断/人工复核)
 │   ├── npu_detector.py             # NPU推理封装类 (ACL接口)
 │   ├── deploy_to_atlas.py          # SSH/SFTP自动部署到Atlas板子
 │   ├── diagnose_existing_outputs.py # 为既有输出补生成诊断TXT报告
-│   ├── batch_rerun_group*.py       # PC端批量处理脚本
 │   ├── review_agent.py             # 人工复核Agent入口
 │   ├── diagnosis_agent.py          # 诊断Agent入口
 │   ├── human_review.py             # 人工复核工具函数
+│   ├── health_module.py            # 健康预警模块
 │   ├── review_registry.json        # 人工复核修正记录
 │   ├── 项目说明.txt                 # 详细文件说明
 │   │
-│   ├── deploy_atlas/               # Atlas板子部署包
+│   ├── deploy_atlas/               # Atlas板子部署包（初始版本）
 │   │   ├── web_monitor.py          # 实时网页监控系统 (含跳帧优化)
 │   │   ├── track_and_count_npu.py  # NPU版计数主脚本
 │   │   ├── npu_detector.py         # NPU检测器 (ACL + OM模型)
+│   │   ├── health_module.py        # 健康预警模块（板端版本）
 │   │   ├── batch_run_npu.py        # NPU端批量处理
 │   │   ├── autonomous_agent.py     # 自主运维Agent
 │   │   ├── bootstrap_board.sh      # 板端环境初始化脚本
@@ -163,17 +164,17 @@ python competition/training/prepare_pigrgb_weight.py \
 │           ├── kalman_filter.py    # 卡尔曼滤波
 │           └── matching.py         # IoU匹配 & 匈牙利算法
 │
-├── paper_assets/                   # 论文素材生成脚本
-├── board/                          # 板端最新改动镜像（体重模型集成）
-│   ├── health_module.py            # 加入 set_weight_model 注入接口
+├── board/                          # 板端最新版本（含体重模型集成，已部署到板子）
+│   ├── health_module.py            # set_weight_model 注入接口
 │   ├── track_and_count_npu.py      # ROI 透传 + --weight_om 显式 opt-in
 │   ├── weight_om.py                # ACL 体重模型推理封装 (MobileViT-S OM)
-│   └── pig_counting_agent.py
+│   └── pig_counting_agent.py       # 统一Agent
+│
+├── paper_assets/                   # 论文素材生成脚本
 ├── tools/
 │   └── push_and_atc.py             # SSH+SFTP+ATC 一键 ONNX→OM 工具
 ├── datasets/                       # 训练数据集（gitignore）
 │   └── PIGRGB-Weight/              # 26 GB，体重回归数据集
-├── runs/                           # 训练输出（onnx/om gitignore，metrics.json 保留）
 ├── 同步教程acl.docx                 # ACL环境配置教程
 └── README.md
 ```

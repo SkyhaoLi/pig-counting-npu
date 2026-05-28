@@ -1,0 +1,134 @@
+================================================================================
+        猪只智能计数系统 —— 项目文件说明
+================================================================================
+
+一、根目录脚本
+──────────────
+
+  track_and_count.py
+    PC端计数主脚本。PyTorch YOLO检测 + ByteTrack追踪 + 三线穿越计数。
+    输出标注视频、ID事件CSV、轨迹报告CSV、状态变化TXT、计数汇总CSV。
+    用法: python track_and_count.py --video_path xx.mp4 --model_path best.pt --output_dir ./out
+
+  pig_counting_agent.py
+    统一Agent实现。整合人工复核、诊断分析、运行状态监控功能。
+    诊断输出为TXT格式。
+
+  npu_detector.py
+    NPU推理封装类(ACL接口)。加载OM模型, 完成预处理/推理/NMS后处理。
+    根目录这份供本地参考, deploy_atlas/里有板子上实际运行的副本。
+
+  deploy_to_atlas.py
+    自动化部署脚本。通过SSH/SFTP将deploy_atlas/目录和视频数据集上传到
+    Atlas 200I DK A2板子(192.168.137.100)。
+    用法: python deploy_to_atlas.py
+
+  diagnose_existing_outputs.py
+    为既有批处理输出目录补生成诊断TXT报告与汇总CSV。
+    用法: python diagnose_existing_outputs.py
+
+  review_agent.py / diagnosis_agent.py
+    人工复核/诊断Agent入口, 内部调用pig_counting_agent.py。
+
+  human_review.py
+    人工复核工具函数(加载/应用修正记录)。
+
+  review_registry.json
+    人工复核修正记录(论文用修正计数)。
+
+  agent_smoke_test.py
+    本地smoke test, 验证Agent导入链和基本功能。
+
+
+二、trackers/ —— ByteTrack追踪器
+─────────────────────────────────
+
+  byte_tracker/
+    ├── byte_tracker.py       ByteTrack主体(BYTETracker类, STrack类)
+    ├── basetrack.py          轨迹基类(TrackState状态机)
+    ├── kalman_filter.py      卡尔曼滤波(预测+更新)
+    ├── matching.py           IoU计算、匈牙利匹配、分数融合
+    ├── byte_tracker_public.py  公开版追踪器(可选保留)
+    └── __init__.py
+
+  这是ByteTrack论文的完整实现, PC端和NPU端共用。
+
+
+三、deploy_atlas/ —— Atlas板子部署包
+─────────────────────────────────────
+
+  web_monitor.py
+    实时网页监控系统。支持:
+    - 浏览器上传视频进行离线推理
+    - RTSP摄像头实时监控(MJPEG流推送)
+    - 三栏布局: 视频流 + 实时统计 + 推理历史
+    - 推理历史持久化, 每条记录提供 6 个下载按钮:
+      汇总(summary.csv) / 轨迹(trajectory_report.csv) /
+      状态(state_changes.txt) / 健康(health_report.txt) /
+      诊断(diagnosis.txt) / 删除
+    - 跳帧优化(skip_interval=2, 每2帧推理1次, 帧率翻倍)
+    - 已上传视频可点 × 删除
+    - supervisor.sh 守护进程: 子进程异常退出后 3 秒内自动重启
+    浏览器访问 http://192.168.137.100:8080
+
+  health_module.py
+    健康预警与体重估计模块。MVP 阶段为纯启发式公式 (numpy):
+    - 体重估计: median(框面积) / 800.0, 透视校正, clip 到 [5, 350] kg
+    - 姿态识别: median(宽高比), >1.5 lying_side / <0.7 standing / else lying_belly
+    - 活动度: 总位移/时长/50px·s, clip 到 [0, 1]
+    - 健康评分: 0.5·活动度 + 0.25·姿态权重 + 0.15·归一熵 - 0.1·异常比例
+    - 异常判别: LOW_HEALTH (health<0.4) + WEIGHT_OUTLIER (|Z|>2.0)
+    预留 set_weight_model() / set_health_model() 接口,
+    训练完 MobileViT-S 体重模型与 V-JEPA 微调权重后注入。
+
+  track_and_count_npu.py
+    NPU版计数主脚本。逻辑与track_and_count.py一致,
+    区别是用NPUDetector替代PyTorch YOLO做检测。
+    ZoneAnalyzer.finalize() 内调 health_module.diagnose_trajectory 与
+    aggregate_herd, 把体重/姿态/活动度/健康分写入 summary.csv、
+    trajectory_report.csv、state_changes.txt、health_report.txt。
+
+  npu_detector.py
+    NPU检测器(板子上实际运行的版本)。
+    ACL加载OM模型, 含手动NMS后处理。
+
+  batch_run_npu.py
+    NPU端批量处理脚本。遍历视频目录, 逐个调用track_and_count_npu.py。
+
+  autonomous_agent.py
+    自主运维Agent, 封装PigCountingAgent用于web_monitor的状态监控。
+
+  bootstrap_board.sh
+    板端环境初始化脚本。检查依赖、语法校验、打印启动提示。
+
+  trackers/
+    ByteTrack追踪器副本(与根目录trackers/内容相同, 部署到板子上用)。
+
+
+四、数据集/ —— 视频数据
+────────────────────────
+
+  一/ 二/ 三/    早期数据集(已跑完, 留作参考)
+  四/            第四组: 23个视频, 文件名含真实头数(如"1-12头.mp4")
+  五/            第五组: 1个长视频
+  六/            第六组: 3个视频(含长视频拼接版)
+
+
+五、运行环境
+────────────
+
+  PC端:
+    Python: C:\Users\Skyha\.conda\envs\ai-study\python.exe
+    模型: best.pt (训练权重)
+    依赖: ultralytics, opencv-python, numpy, tqdm
+
+  Atlas板端:
+    地址: 192.168.137.100 (HwHiAiUser / Mind@123)
+    模型: ~/pig_counting/models/yolov8n_pig_fp16.om
+    环境: CANN 7.0.RC1, Python 3.10.6, opencv-python, numpy
+    CANN环境: source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+  摄像头:
+    IP: 192.168.2.103 (admin / admin123@)
+    RTSP: rtsp://admin:admin123%40@192.168.2.103:554/cam/realmonitor?channel=1&subtype=1
+    注意: 板子需要先添加摄像头网段IP: ip addr add 192.168.2.100/24 dev eth0
