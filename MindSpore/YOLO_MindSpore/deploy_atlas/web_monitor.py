@@ -1255,7 +1255,24 @@ def main():
     parser.add_argument('--track-thresh', type=float, default=0.5)
     parser.add_argument('--out-ratio', type=float, default=0.45)
     parser.add_argument('--wait-ratio', type=float, default=0.25)
+    parser.add_argument('--weight_om', type=str, default='models/weight_regressor_fp16.om',
+                        help='Path to weight regressor .om (auto-loads if file exists)')
+    parser.add_argument('--no_weight_model', action='store_true',
+                        help='Disable weight model, use heuristic only')
     args = parser.parse_args()
+
+    # 体重模型（默认自动加载，--no_weight_model 可关闭）
+    if not args.no_weight_model and args.weight_om and Path(args.weight_om).exists():
+        try:
+            from health_module import set_weight_model
+            from weight_om import WeightOMModel
+            wm = WeightOMModel(args.weight_om)
+            set_weight_model(wm)
+            print(f"[health] weight model injected: {args.weight_om}")
+        except Exception as e:
+            print(f"[health] weight model load failed, using heuristic: {e}")
+    else:
+        print("[health] weight model disabled; using heuristic")
 
     server_config['om_path'] = args.om
     server_config['output_dir'] = args.output

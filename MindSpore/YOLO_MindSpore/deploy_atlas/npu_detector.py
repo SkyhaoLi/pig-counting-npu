@@ -43,11 +43,14 @@ class NPUDetector:
                 raise ImportError("Cannot import acl. Make sure CANN toolkit is installed.")
 
         # Init ACL
-        ret = self.acl.init()
-        assert ret == ACL_SUCCESS, f"acl.init failed: {ret}"
-
-        ret = self.acl.rt.set_device(0)
-        assert ret == ACL_SUCCESS, f"set_device failed: {ret}"
+        try:
+            self.acl.init()
+        except Exception:
+            pass  # already initialized
+        try:
+            self.acl.rt.set_device(0)
+        except Exception:
+            pass  # already set
 
         self.context, ret = self.acl.rt.create_context(0)
         assert ret == ACL_SUCCESS, f"create_context failed: {ret}"

@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from npu_detector import NPUDetector
 
 # 健康预警模块（体重估计 + 健康评分）
-from health_module import diagnose_trajectory, aggregate_herd
+from health_module import diagnose_trajectory, aggregate_herd, set_weight_model, set_grate_config
 
 
 class PigTrajectory:
@@ -47,8 +47,14 @@ class PigTrajectory:
         self.lost_frames = []
         self.recovered_count = 0
         self.last_cx = None
+        # 体重模型用：保存最近一次有效 ROI 裁剪 (BGR HxWx3 uint8)
+        self.last_roi = None
+        # 体重校正用：每框底部 Y 和帧中位面积
+        self.box_bottom_ys = []
+        self.frame_median_areas = []
 
-    def add_point(self, zone, frame_idx, fps, cx=None, cy=None, w=None, h=None, conf=None):
+    def add_point(self, zone, frame_idx, fps, cx=None, cy=None, w=None, h=None, conf=None,
+                  roi=None, bottom_y=None, frame_median_area=None):
         if frame_idx - self.last_frame > 1:
             for lost_f in range(self.last_frame + 1, frame_idx):
                 self.lost_frames.append(lost_f)
@@ -61,6 +67,12 @@ class PigTrajectory:
             self.box_sizes.append((w, h, frame_idx))
         if conf is not None:
             self.confidences.append((conf, frame_idx))
+        if roi is not None and roi.size > 0:
+            self.last_roi = roi
+        if bottom_y is not None:
+            self.box_bottom_ys.append((bottom_y, frame_idx))
+        if frame_median_area is not None:
+            self.frame_median_areas.append((frame_median_area, frame_idx))
         if self.zone_history[-1] != zone:
             timestamp = frame_idx / fps
             self.state_changes.append({
@@ -146,7 +158,8 @@ class ZoneAnalyzer:
         else:
             return 'ENTRY'
 
-    def update(self, track_id, cx, frame_idx, cy=None, w=None, h=None, conf=None):
+    def update(self, track_id, cx, frame_idx, cy=None, w=None, h=None, conf=None, roi=None,
+               bottom_y=None, frame_median_area=None):
         zone = self.get_zone(cx)
         if track_id in self.prev_positions:
             prev_cx = self.prev_positions[track_id]
@@ -166,6 +179,12 @@ class ZoneAnalyzer:
 
         if track_id not in self.trajectories:
             self.trajectories[track_id] = PigTrajectory(track_id, frame_idx, zone)
+            if roi is not None and roi.size > 0:
+                self.trajectories[track_id].last_roi = roi
+            if bottom_y is not None:
+                self.trajectories[track_id].box_bottom_ys.append((bottom_y, frame_idx))
+            if frame_median_area is not None:
+                self.trajectories[track_id].frame_median_areas.append((frame_median_area, frame_idx))
             self.id_events.append({
                 'frame': frame_idx, 'timestamp': f"{frame_idx / self.fps:.2f}s",
                 'event': 'NEW_ID', 'track_id': track_id, 'zone': zone,
@@ -173,7 +192,9 @@ class ZoneAnalyzer:
             })
         else:
             old_zone = self.trajectories[track_id].zone_history[-1]
-            self.trajectories[track_id].add_point(zone, frame_idx, self.fps, cx, cy, w, h, conf)
+            self.trajectories[track_id].add_point(zone, frame_idx, self.fps, cx, cy, w, h, conf,
+                                                   roi=roi, bottom_y=bottom_y,
+                                                   frame_median_area=frame_median_area)
             if old_zone != zone:
                 self.id_events.append({
                     'frame': frame_idx, 'timestamp': f"{frame_idx / self.fps:.2f}s",
@@ -194,6 +215,9 @@ class ZoneAnalyzer:
                 positions=traj.positions,
                 fps=self.fps,
                 frame_area=frame_area,
+                roi_image=traj.last_roi,
+                box_bottom_ys=traj.box_bottom_ys if traj.box_bottom_ys else None,
+                frame_median_areas=traj.frame_median_areas if traj.frame_median_areas else None,
             )
             diagnoses[tid] = diag
             valid_only.append(diag)
@@ -206,6 +230,9 @@ class ZoneAnalyzer:
                 diagnoses[tid] = diagnose_trajectory(
                     box_sizes=traj.box_sizes, positions=traj.positions,
                     fps=self.fps, frame_area=frame_area, herd_stats=herd_stats,
+                    roi_image=traj.last_roi,
+                    box_bottom_ys=traj.box_bottom_ys if traj.box_bottom_ys else None,
+                    frame_median_areas=traj.frame_median_areas if traj.frame_median_areas else None,
                 )
             herd = aggregate_herd(list(diagnoses.values()))
         return diagnoses, herd
@@ -425,12 +452,24 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
         tracks = tracker.update(dets, (height, width), (height, width))
         active_tracks = [(int(track.track_id), track.tlbr) for track in tracks if track.is_activated]
 
+        # 计算本帧所有 bbox 面积的中位数（用于帧内归一化）
+        frame_areas = [(bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) for _, bbox in active_tracks]
+        frame_median = float(np.median(frame_areas)) if frame_areas else 0.0
+
         for tid, bbox in active_tracks:
             cx = (bbox[0] + bbox[2]) / 2
             cy = (bbox[1] + bbox[3]) / 2
             w = bbox[2] - bbox[0]
             h = bbox[3] - bbox[1]
-            analyzer.update(tid, cx, frame_idx, cy, w, h)
+            bottom_y = bbox[3]  # y2 = 底部 Y
+            # 裁出 ROI 供体重模型；clamp 到画面内，过小则跳过
+            x1c = max(0, int(bbox[0]))
+            y1c = max(0, int(bbox[1]))
+            x2c = min(width, int(bbox[2]))
+            y2c = min(height, int(bbox[3]))
+            roi = frame[y1c:y2c, x1c:x2c] if x2c - x1c >= 8 and y2c - y1c >= 8 else None
+            analyzer.update(tid, cx, frame_idx, cy, w, h, roi=roi,
+                            bottom_y=bottom_y, frame_median_area=frame_median)
 
         # Draw
         annotated = frame.copy()
@@ -486,6 +525,16 @@ def main():
     parser.add_argument('--wait_ratio', type=float, default=0.25)
     parser.add_argument('--conf_thres', type=float, default=0.25)
     parser.add_argument('--track_thresh', type=float, default=0.5)
+    parser.add_argument('--weight_om', type=str, default='models/weight_regressor_fp16.om',
+                        help='Path to weight regressor .om (auto-loads if file exists)')
+    parser.add_argument('--no_weight_model', action='store_true',
+                        help='Disable weight model, use heuristic only')
+    parser.add_argument('--grate_roi', type=str, default='',
+                        help='井盖像素坐标 x1,y1,x2,y2（空=不启用井盖参照）')
+    parser.add_argument('--grate_size_m', type=float, default=0.6,
+                        help='井盖实际边长（米），默认 0.6')
+    parser.add_argument('--horizon_y', type=float, default=0,
+                        help='消失线 Y 坐标（0=自动取画面高度30%）')
     parser.add_argument('--no_timestamp', action='store_true')
     args = parser.parse_args()
 
@@ -502,11 +551,40 @@ def main():
     print("\nLoading NPU model...")
     detector = NPUDetector(args.om, conf_thres=args.conf_thres)
 
+    # Weight regressor: auto-loads by default, --no_weight_model to disable
+    if not args.no_weight_model and args.weight_om and Path(args.weight_om).exists():
+        try:
+            from weight_om import WeightOMModel
+            wm = WeightOMModel(args.weight_om)
+            set_weight_model(wm)
+            print(f"[health] weight model injected: {args.weight_om}")
+        except Exception as e:
+            print(f"[health] weight model load failed, using heuristic: {e}")
+    else:
+        print("[health] weight model disabled; using heuristic")
+
     cap = cv2.VideoCapture(args.video)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
+
+    # 井盖参照配置
+    if args.grate_roi:
+        try:
+            parts = [float(x) for x in args.grate_roi.split(',')]
+            if len(parts) == 4:
+                h_y = args.horizon_y if args.horizon_y > 0 else None
+                set_grate_config(True, bbox=parts, size_m=args.grate_size_m,
+                                 horizon_y=h_y, frame_height=height)
+                print(f"[health] grate reference enabled: roi={parts}, "
+                      f"size={args.grate_size_m}m, horizon_y={h_y or 'auto'}")
+            else:
+                print("[health] grate_roi must be 4 values (x1,y1,x2,y2); disabled")
+        except ValueError:
+            print(f"[health] invalid grate_roi '{args.grate_roi}'; disabled")
+    else:
+        print("[health] grate reference disabled (default)")
 
     try:
         valid, total_ids = run_bytetrack(

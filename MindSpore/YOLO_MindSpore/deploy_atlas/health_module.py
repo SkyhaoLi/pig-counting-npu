@@ -31,6 +31,15 @@ import numpy as np
 _WEIGHT_MODEL = None  # 训练好的体重回归模型（MobileViT-S onnx）
 _HEALTH_MODEL = None  # 训练好的行为分类 / V-JEPA 微调权重
 
+# 井盖参照配置（默认关闭）
+_GRATE_CONFIG = {
+    "enabled": False,
+    "bbox": None,       # (x1, y1, x2, y2) 井盖在画面中的像素坐标
+    "size_m": 0.6,      # 井盖实际边长（米）
+    "horizon_y": None,  # 消失线 Y 坐标（None → 自动取画面高度 30%）
+}
+_FRAME_HEIGHT = None  # 画面高度，用于自动计算 horizon_y
+
 
 def set_weight_model(model) -> None:
     """注入训练好的体重模型（须实现 predict(roi_image) -> float）。"""
@@ -44,30 +53,106 @@ def set_health_model(model) -> None:
     _HEALTH_MODEL = model
 
 
+def set_grate_config(enabled: bool, bbox=None, size_m: float = 0.6,
+                     horizon_y: float = None, frame_height: int = None) -> None:
+    """注入井盖参照配置。
+
+    Args:
+        enabled: 是否启用井盖参照
+        bbox: (x1, y1, x2, y2) 井盖在画面中的像素坐标
+        size_m: 井盖实际边长（米），默认 0.6
+        horizon_y: 消失线 Y 坐标，None 则自动取画面高度 30%
+        frame_height: 画面高度，用于自动计算 horizon_y
+    """
+    global _GRATE_CONFIG, _FRAME_HEIGHT
+    _GRATE_CONFIG["enabled"] = enabled
+    if bbox is not None:
+        _GRATE_CONFIG["bbox"] = tuple(bbox)
+    _GRATE_CONFIG["size_m"] = size_m
+    if horizon_y is not None:
+        _GRATE_CONFIG["horizon_y"] = horizon_y
+    if frame_height is not None:
+        _FRAME_HEIGHT = frame_height
+
+
 # ----------------------------------------------------------------------
 # 体重估计
 # ----------------------------------------------------------------------
 def estimate_weight_kg(box_sizes: Sequence[Tuple[float, float, int]],
                        weight_scale: float = 800.0,
-                       frame_area: Optional[float] = None) -> float:
-    """根据 ByteTrack 框面积估计体重（kg）。
+                       frame_area: Optional[float] = None,
+                       roi_image: "Optional[np.ndarray]" = None,
+                       box_bottom_ys: Optional[Sequence[Tuple[float, int]]] = None,
+                       frame_median_areas: Optional[Sequence[Tuple[float, int]]] = None) -> float:
+    """估计体重（kg）。
+
+    优先策略：注入了 `_WEIGHT_MODEL` 且提供了 `roi_image` 时走训练好的模型，
+    否则回退到 box 面积启发式。
+
+    启发式分支支持两种校正：
+    1. 帧内归一化（frame_median_areas）：消除同帧猪只远近差异
+    2. 井盖透视校正（box_bottom_ys + 井盖配置）：基于物理参照的距离补偿
 
     Args:
-        box_sizes: [(w, h, frame_idx), ...] 序列
-        weight_scale: 像素面积到 kg 的折算系数（经验默认 800.0）
-        frame_area: 如果给出，会做透视校正（remote pig has smaller box）
+        box_sizes: [(w, h, frame_idx), ...] 序列（启发式用）
+        weight_scale: 像素面积到 kg 的折算系数（启发式用，经验默认 800.0）
+        frame_area: 如果给出，会做简单透视校正（启发式用，兜底）
+        roi_image: 单张猪体 ROI 裁剪 (HxWx3 BGR uint8)；走模型分支时必须提供
+        box_bottom_ys: [(y_bottom, frame_idx), ...] 每框底部 Y 坐标（透视校正用）
+        frame_median_areas: [(median_area, frame_idx), ...] 每帧所有 bbox 面积中位数
 
     Returns:
-        体重 kg；若无框则返回 0.0
+        体重 kg；若两条路径都无数据则返回 0.0
     """
+    # 模型分支
+    if _WEIGHT_MODEL is not None and roi_image is not None and roi_image.size > 0:
+        try:
+            kg = float(_WEIGHT_MODEL.predict(roi_image))
+            return float(np.clip(kg, 5.0, 350.0))
+        except Exception as e:
+            print(f"[health_module] weight model failed, falling back to heuristic: {e}")
+
+    # 启发式分支
     if not box_sizes:
         return 0.0
 
     areas = np.array([w * h for w, h, _ in box_sizes], dtype=np.float32)
     median_area = float(np.median(areas))
 
-    if frame_area and frame_area > 0:
-        # 简单透视校正：以画面面积的 5% 为参考尺度
+    # 1. 帧内归一化：同一帧的猪距离摄像头差不多，用帧中位面积消除远近差异
+    if frame_median_areas:
+        fma_values = np.array([v for v, _ in frame_median_areas], dtype=np.float32)
+        avg_frame_median = float(np.mean(fma_values))
+        ref_area = 40000.0  # ~200x200 像素，参考"正常距离"面积
+        if avg_frame_median > 1:
+            median_area = median_area * (ref_area / avg_frame_median)
+
+    # 2. 井盖透视校正：利用井盖物理尺寸做距离补偿
+    if _GRATE_CONFIG["enabled"] and _GRATE_CONFIG["bbox"] is not None and box_bottom_ys:
+        bbox = _GRATE_CONFIG["bbox"]
+        grate_cy = (bbox[1] + bbox[3]) / 2.0  # 井盖中心 Y
+        size_m = _GRATE_CONFIG["size_m"]
+        grate_pixel_w = bbox[2] - bbox[0]
+
+        # 消失线 Y：优先用配置值，否则自动取画面高度 30%
+        h_y = _GRATE_CONFIG.get("horizon_y")
+        if h_y is None:
+            h_y = _FRAME_HEIGHT * 0.3 if _FRAME_HEIGHT else 0
+
+        # 每头猪的底部 Y 中位数
+        bottom_values = np.array([y for y, _ in box_bottom_ys], dtype=np.float32)
+        median_bottom_y = float(np.median(bottom_values))
+
+        # 距离比：底部 Y 越接近消失线 = 越远
+        grate_dist = grate_cy - h_y
+        pig_dist = median_bottom_y - h_y
+        if grate_dist > 0 and pig_dist > 0:
+            dist_ratio = pig_dist / grate_dist
+            # 面积与距离平方成反比 → 用距离比做校正
+            median_area = median_area * (dist_ratio ** 2)
+
+    # 3. 兜底：旧式简单透视校正（无井盖时仍可用）
+    elif frame_area and frame_area > 0 and not frame_median_areas:
         ref = frame_area * 0.05
         median_area = median_area * (ref / max(median_area, 1.0)) ** 0.2
 
@@ -188,9 +273,22 @@ def diagnose_trajectory(box_sizes: Sequence[Tuple[float, float, int]],
                         positions: Sequence[Tuple[float, float, int]],
                         fps: float,
                         frame_area: Optional[float] = None,
-                        herd_stats: Optional[dict] = None) -> dict:
-    """单条轨迹的完整诊断。"""
-    weight = estimate_weight_kg(box_sizes, frame_area=frame_area)
+                        herd_stats: Optional[dict] = None,
+                        roi_image: "Optional[np.ndarray]" = None,
+                        box_bottom_ys: Optional[Sequence[Tuple[float, int]]] = None,
+                        frame_median_areas: Optional[Sequence[Tuple[float, int]]] = None) -> dict:
+    """单条轨迹的完整诊断。
+
+    Args:
+        roi_image: 可选 — 该轨迹的代表性 ROI 裁剪 (BGR HxWx3 uint8)，
+            注入了体重模型时用它做模型推理；为 None 时仅启发式。
+        box_bottom_ys: [(y_bottom, frame_idx), ...] 每框底部 Y 坐标
+        frame_median_areas: [(median_area, frame_idx), ...] 每帧 bbox 面积中位数
+    """
+    weight = estimate_weight_kg(box_sizes, frame_area=frame_area,
+                                roi_image=roi_image,
+                                box_bottom_ys=box_bottom_ys,
+                                frame_median_areas=frame_median_areas)
     posture = compute_posture(box_sizes)
     entropy = posture_entropy(box_sizes)
     activity = compute_activity(positions, fps)
@@ -256,9 +354,31 @@ if __name__ == "__main__":
     mock_box = [(100.0, 80.0, i) for i in range(50)]
     mock_pos = [(50 + 3 * i, 100, i) for i in range(50)]
     diag = diagnose_trajectory(mock_box, mock_pos, fps=25.0)
-    print("[SELF-TEST] single trajectory diagnosis:")
+    print("[SELF-TEST] single trajectory diagnosis (no correction):")
     for k, v in diag.items():
         print(f"  {k}: {v}")
+
+    # 测试帧内归一化
+    mock_bottom_ys = [(300.0, i) for i in range(50)]
+    mock_frame_med = [(8000.0, i) for i in range(50)]  # 帧中位面积 8000
+    diag_norm = diagnose_trajectory(mock_box, mock_pos, fps=25.0,
+                                    box_bottom_ys=mock_bottom_ys,
+                                    frame_median_areas=mock_frame_med)
+    print("[SELF-TEST] with frame normalization:")
+    for k, v in diag_norm.items():
+        print(f"  {k}: {v}")
+
+    # 测试井盖透视校正
+    set_grate_config(True, bbox=(100, 400, 220, 520), size_m=0.6, frame_height=720)
+    diag_grate = diagnose_trajectory(mock_box, mock_pos, fps=25.0,
+                                     box_bottom_ys=mock_bottom_ys,
+                                     frame_median_areas=mock_frame_med)
+    print("[SELF-TEST] with grate perspective correction:")
+    for k, v in diag_grate.items():
+        print(f"  {k}: {v}")
+
+    # 关闭井盖，恢复默认
+    set_grate_config(False)
 
     herd = aggregate_herd([diag, diag, diag])
     print("[SELF-TEST] herd aggregate (3 same pigs):")
