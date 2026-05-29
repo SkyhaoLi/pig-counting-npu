@@ -68,7 +68,13 @@ class NPUDetector:
 
         # Setup input/output datasets
         self._setup_io()
-        print(f"[NPU] Loaded: {om_path}")
+
+        # Detect number of classes from output shape
+        out_bytes = self.output_sizes[0]
+        total_cols = out_bytes // (4 * 8400)  # float32 = 4 bytes
+        self.nc = total_cols - 4
+        self.class_names = {0: "pig", 1: "sheep"} if self.nc > 1 else {0: "pig"}
+        print(f"[NPU] Loaded: {om_path} (classes: {self.nc})")
 
     def _setup_io(self):
         acl = self.acl
@@ -149,14 +155,27 @@ class NPUDetector:
         out_bytes = acl.util.ptr_to_bytes(self.host_out_buf, size)
         output_data = np.frombuffer(out_bytes, dtype=np.float32).copy()
 
-        # Reshape to [8400, 5]
-        output = output_data.reshape(1, 8400, 5)[0]
+        # Reshape output: [1, 8400, 4+nc]
+        # Single-class: [1, 8400, 5] (cx,cy,w,h,conf)
+        # Multi-class:  [1, 8400, 4+nc] (cx,cy,w,h,cls0_conf,cls1_conf,...)
+        total_cols = output_data.size // 8400
+        nc = total_cols - 4  # number of classes
+        output = output_data.reshape(1, 8400, total_cols)[0]
 
-        # Parse detections (same as ONNX detector)
-        # columns: cx, cy, w, h, conf (single class)
-        conf = output[:, 4]
+        if nc > 1:
+            # Multi-class: per-class confidence scores
+            cls_scores = output[:, 4:]  # [8400, nc]
+            conf = cls_scores.max(axis=1)
+            cls_ids = cls_scores.argmax(axis=1).astype(np.float32)
+        else:
+            # Single-class (backward compat)
+            conf = output[:, 4]
+            cls_ids = np.zeros(8400, dtype=np.float32)
+
         mask = conf > self.conf_thres
         dets = output[mask]
+        conf = conf[mask]
+        cls_ids = cls_ids[mask]
 
         if len(dets) == 0:
             return np.empty((0, 6))
@@ -166,14 +185,30 @@ class NPUDetector:
         y1 = (cy - h / 2) / scale
         x2 = (cx + w / 2) / scale
         y2 = (cy + h / 2) / scale
-        scores = dets[:, 4]
 
-        # NMS to remove overlapping candidate boxes (YOLOv8 head emits ~8400)
-        boxes = np.stack([x1, y1, x2, y2], axis=1)
-        keep = self._nms(boxes, scores, iou_thres=0.45)
-        x1, y1, x2, y2, scores = x1[keep], y1[keep], x2[keep], y2[keep], scores[keep]
+        # Per-class NMS
+        unique_classes = np.unique(cls_ids)
+        all_x1, all_y1, all_x2, all_y2, all_conf, all_cls = [], [], [], [], [], []
+        for cid in unique_classes:
+            c_mask = cls_ids == cid
+            bx = np.stack([x1[c_mask], y1[c_mask], x2[c_mask], y2[c_mask]], axis=1)
+            sc = conf[c_mask]
+            keep = self._nms(bx, sc, iou_thres=0.45)
+            all_x1.append(x1[c_mask][keep])
+            all_y1.append(y1[c_mask][keep])
+            all_x2.append(x2[c_mask][keep])
+            all_y2.append(y2[c_mask][keep])
+            all_conf.append(sc[keep])
+            all_cls.append(np.full(len(keep), cid))
 
-        results = np.stack([x1, y1, x2, y2, scores, np.zeros_like(scores)], axis=1)
+        results = np.stack([
+            np.concatenate(all_x1),
+            np.concatenate(all_y1),
+            np.concatenate(all_x2),
+            np.concatenate(all_y2),
+            np.concatenate(all_conf),
+            np.concatenate(all_cls),
+        ], axis=1)
         return results
 
     @staticmethod

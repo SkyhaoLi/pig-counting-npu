@@ -33,6 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pig_counting_agent import PigCountingAgent
 
 # ── Globals ──────────────────────────────────────────────────
+CLASS_COLORS = {0: (0, 255, 0), 1: (0, 165, 255)}  # pig=green, sheep=orange
+CLASS_NAMES = {0: 'Pig', 1: 'Sheep'}
+
 app_state = {
     'running': False,
     'mode': 'idle',
@@ -42,6 +45,8 @@ app_state = {
     'frame_count': 0,
     'line_counters': {'line0': 0, 'line1': 0, 'line2': 0},
     'total_count': 0,
+    'pig_count': 0,
+    'sheep_count': 0,
     'valid_traj': 0,
     'total_ids': 0,
     'start_time': None,
@@ -347,6 +352,8 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
     frame_idx = 0
     skip_interval = 2  # process every Nth frame (1=all, 2=skip one, 3=skip two)
     active_tracks = []
+    tracks = []
+    track_class_map = {}
     t_last = time.time()
     fps_counter = 0
     last_export = 0.0
@@ -414,31 +421,60 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
 
         if frame_idx % skip_interval == 0:
             raw_dets = detector.detect(frame)
-            detections = [det[:5] for det in raw_dets if not is_blue_object(frame, det[:5])]
+            # Filter blue objects, keep class_id
+            detections = []
+            det_class_ids = []
+            for det in raw_dets:
+                bbox = det[:5]
+                if is_blue_object(frame, bbox):
+                    continue
+                detections.append(bbox[:5])
+                det_class_ids.append(det[5] if len(det) > 5 else 0)
             dets = np.array(detections) if detections else np.empty((0, 5))
             tracks = tracker.update(dets, (height, width), (height, width))
             active_tracks = [(int(t.track_id), t.tlbr) for t in tracks if t.is_activated]
+
+            # Match track positions to detection class_ids
+            track_class_map = {}
+            for t in tracks:
+                if not t.is_activated:
+                    continue
+                tid = int(t.track_id)
+                tb = t.tlbr
+                tcx, tcy = (tb[0]+tb[2])/2, (tb[1]+tb[3])/2
+                best_dist, best_cls = float('inf'), 0
+                for i, det in enumerate(detections):
+                    dcx, dcy = (det[0]+det[2])/2, (det[1]+det[3])/2
+                    dist = (tcx-dcx)**2 + (tcy-dcy)**2
+                    if dist < best_dist:
+                        best_dist, best_cls = dist, det_class_ids[i]
+                track_class_map[tid] = int(best_cls)
 
             for tid, bbox in active_tracks:
                 cx = (bbox[0] + bbox[2]) / 2
                 cy = (bbox[1] + bbox[3]) / 2
                 bw = bbox[2] - bbox[0]
                 bh = bbox[3] - bbox[1]
-                analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None)
+                class_id = track_class_map.get(tid, 0)
+                analyzer.update(tid, cx, frame_idx, cy=cy, w=bw, h=bh, conf=None, class_id=class_id)
 
         annotated = frame.copy()
         cv2.line(annotated, (int(analyzer.split_0), 0), (int(analyzer.split_0), height), (255, 128, 0), 2)
         cv2.line(annotated, (int(analyzer.split_1), 0), (int(analyzer.split_1), height), (0, 255, 255), 2)
         cv2.line(annotated, (int(analyzer.split_2), 0), (int(analyzer.split_2), height), (0, 255, 255), 2)
         total = get_total_count(analyzer)
-        cv2.rectangle(annotated, (width - 200, 0), (width, 60), (0, 0, 0), -1)
-        cv2.putText(annotated, f"TOTAL: {total}", (width - 190, 40), 0, 1.0, (0, 255, 0), 2)
+        pig_active = sum(1 for t in tracks if t.is_activated and track_class_map.get(int(t.track_id), 0) == 0)
+        sheep_active = sum(1 for t in tracks if t.is_activated and track_class_map.get(int(t.track_id), 0) == 1)
+        cv2.rectangle(annotated, (width - 200, 0), (width, 90), (0, 0, 0), -1)
+        cv2.putText(annotated, f"TOTAL: {total}", (width - 190, 25), 0, 0.8, (0, 255, 0), 2)
+        cv2.putText(annotated, f"Pig:{pig_active} Sheep:{sheep_active}", (width - 190, 55), 0, 0.55, (0, 200, 255), 1)
         for tid, bbox in active_tracks:
             x1, y1, x2, y2 = map(int, bbox)
-            np.random.seed(tid)
-            color = tuple(map(int, np.random.randint(50, 255, 3)))
+            cid = track_class_map.get(tid, 0)
+            color = CLASS_COLORS.get(cid, (0, 255, 0))
+            label = CLASS_NAMES.get(cid, '?')
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(annotated, f"{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
+            cv2.putText(annotated, f"{label}:{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
 
         _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 55])
 
@@ -462,6 +498,8 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
             app_state['frame_count'] = frame_idx
             app_state['line_counters'] = dict(analyzer.line_counters)
             app_state['total_count'] = total
+            app_state['pig_count'] = pig_active
+            app_state['sheep_count'] = sheep_active
             app_state['valid_traj'] = valid_traj
             app_state['total_ids'] = total_ids
             app_state['agent_status'] = snapshot['status']
@@ -472,7 +510,7 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
             app_state['agent_events'] = snapshot['events']
             elapsed = time.time() - app_state['start_time']
             if len(app_state['history']) == 0 or elapsed - app_state['history'][-1]['time'] >= 5:
-                app_state['history'].append({'time': round(elapsed, 1), 'total': total})
+                app_state['history'].append({'time': round(elapsed, 1), 'total': total, 'pig': pig_active, 'sheep': sheep_active})
             if elapsed - last_export >= 5:
                 do_export = True
                 last_export = elapsed
@@ -689,6 +727,10 @@ input[type=text] { width: 100%; padding: 7px; border-radius: 6px; border: 1px so
         <div class="card">
             <h3>Total Count</h3>
             <div class="big-number" id="total">0</div>
+            <div class="stat-grid" style="margin-top:8px">
+                <div class="stat"><div class="label" style="color:#22c55e">Pig</div><div class="value" id="pigCount">0</div></div>
+                <div class="stat"><div class="label" style="color:#f97316">Sheep</div><div class="value" id="sheepCount">0</div></div>
+            </div>
         </div>
         <div class="card">
             <h3>Line Crossings</h3>
@@ -867,6 +909,8 @@ function update(){
     }
     if(d.mode==='running'){
       document.getElementById('total').textContent=d.total_count;
+      document.getElementById('pigCount').textContent=d.pig_count||0;
+      document.getElementById('sheepCount').textContent=d.sheep_count||0;
       document.getElementById('line0').textContent=d.line0;
       document.getElementById('line1').textContent=d.line1;
       document.getElementById('line2').textContent=d.line2;
@@ -961,6 +1005,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = {
                     'mode': app_state['mode'],
                     'total_count': app_state['total_count'],
+                    'pig_count': app_state['pig_count'],
+                    'sheep_count': app_state['sheep_count'],
                     'line0': app_state['line_counters'].get('line0', 0),
                     'line1': app_state['line_counters'].get('line1', 0),
                     'line2': app_state['line_counters'].get('line2', 0),
@@ -1114,6 +1160,8 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     app_state['line_counters'] = {'line0': 0, 'line1': 0, 'line2': 0}
                     app_state['total_count'] = 0
+                    app_state['pig_count'] = 0
+                    app_state['sheep_count'] = 0
                     app_state['valid_traj'] = 0
                     app_state['total_ids'] = 0
                     app_state['frame_count'] = 0

@@ -36,6 +36,7 @@ class PigTrajectory:
 
     def __init__(self, track_id, first_frame, first_zone):
         self.track_id = track_id
+        self.class_id = 0  # 0=pig, 1=sheep, set after creation
         self.zone_history = [first_zone]
         self.state_changes = []
         self.first_frame = first_frame
@@ -146,6 +147,8 @@ class ZoneAnalyzer:
         self.split_2 = width * (out_ratio + wait_ratio)
         self.trajectories = {}
         self.valid_count = 0
+        self.class_names = {0: 'pig', 1: 'sheep'}
+        self.counts_by_class = defaultdict(int)  # class_id -> valid count
         self.id_events = []
         self.line_counters = {'line0': 0, 'line1': 0, 'line2': 0}
         self.prev_positions = {}
@@ -159,7 +162,7 @@ class ZoneAnalyzer:
             return 'ENTRY'
 
     def update(self, track_id, cx, frame_idx, cy=None, w=None, h=None, conf=None, roi=None,
-               bottom_y=None, frame_median_area=None):
+               bottom_y=None, frame_median_area=None, class_id=None):
         zone = self.get_zone(cx)
         if track_id in self.prev_positions:
             prev_cx = self.prev_positions[track_id]
@@ -179,6 +182,8 @@ class ZoneAnalyzer:
 
         if track_id not in self.trajectories:
             self.trajectories[track_id] = PigTrajectory(track_id, frame_idx, zone)
+            if class_id is not None:
+                self.trajectories[track_id].class_id = int(class_id)
             if roi is not None and roi.size > 0:
                 self.trajectories[track_id].last_roi = roi
             if bottom_y is not None:
@@ -281,8 +286,14 @@ class ZoneAnalyzer:
                 f.write("\n")
                 if is_valid:
                     self.valid_count += 1
+                    if hasattr(traj, 'class_id'):
+                        self.counts_by_class[traj.class_id] += 1
             f.write(f"{'=' * 70}\n")
             f.write(f"TOTAL VALID: {self.valid_count}\n")
+            for cid, cname in sorted(self.class_names.items()):
+                cnt = self.counts_by_class.get(cid, 0)
+                if cnt > 0:
+                    f.write(f"{cname.upper()} VALID: {cnt}\n")
             f.write(f"TOTAL IDs: {len(self.trajectories)}\n")
             if herd and herd["n"] > 0:
                 f.write(f"GROUP HEALTH MEAN: {herd['health_mean']:.3f}\n")
@@ -299,6 +310,7 @@ class ZoneAnalyzer:
             writer = csv.writer(f)
             writer.writerow([
                 'line0', 'line1', 'line2', 'total_line', 'valid_traj', 'total_ids',
+                'pig_count', 'sheep_count',
                 'avg_weight_kg', 'weight_min_kg', 'weight_max_kg', 'weight_std_kg',
                 'group_health_score', 'abnormal_count',
                 'low_health_count', 'weight_outlier_count',
@@ -306,6 +318,7 @@ class ZoneAnalyzer:
             if herd and herd["n"] > 0:
                 writer.writerow([
                     line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    self.counts_by_class.get(0, 0), self.counts_by_class.get(1, 0),
                     round(herd['weight_mean'], 2), round(herd['weight_min'], 2),
                     round(herd['weight_max'], 2), round(herd['weight_std'], 2),
                     round(herd['health_mean'], 3), herd['abnormal_count'],
@@ -314,6 +327,7 @@ class ZoneAnalyzer:
             else:
                 writer.writerow([
                     line0, line1, line2, total_line, self.valid_count, len(self.trajectories),
+                    self.counts_by_class.get(0, 0), self.counts_by_class.get(1, 0),
                     0, 0, 0, 0, 0, 0, 0, 0,
                 ])
 
@@ -321,7 +335,7 @@ class ZoneAnalyzer:
         with open(report_path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                'TrackID', 'IsValid', 'Reason', 'FirstFrame', 'FirstTime(s)',
+                'TrackID', 'ClassName', 'IsValid', 'Reason', 'FirstFrame', 'FirstTime(s)',
                 'LastFrame', 'LastTime(s)', 'Duration(s)', 'ZoneHistory', 'StateChanges',
                 'EstWeight(kg)', 'Posture', 'ActivityScore', 'HealthScore', 'AbnormalFlags',
             ])
@@ -339,8 +353,9 @@ class ZoneAnalyzer:
                     flags_s = ",".join(d['abnormal_flags']) if d['abnormal_flags'] else ''
                 else:
                     weight_s = posture_s = activity_s = health_s = flags_s = ''
+                class_name = self.class_names.get(getattr(traj, 'class_id', 0), 'pig')
                 writer.writerow([
-                    tid, is_valid, reason, traj.first_frame,
+                    tid, class_name, is_valid, reason, traj.first_frame,
                     f"{traj.first_frame / self.fps:.2f}", traj.last_frame,
                     f"{traj.last_frame / self.fps:.2f}", f"{duration:.2f}",
                     zone_str, changes_str,
@@ -351,7 +366,7 @@ class ZoneAnalyzer:
         health_path = output_dir / f"{tracker_name}_health_report.txt"
         with open(health_path, 'w', encoding='utf-8') as f:
             f.write(f"{'=' * 70}\n")
-            f.write(f"Pig Health Report - {tracker_name}\n")
+            f.write(f"Livestock Health Report - {tracker_name}\n")
             f.write(f"{'=' * 70}\n\n")
             if herd and herd["n"] > 0:
                 f.write(f"[Herd] n={herd['n']}\n")
@@ -440,17 +455,31 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
         # NPU detection: returns [x1, y1, x2, y2, conf, cls]
         raw_dets = detector.detect(frame)
 
-        # Filter blue objects and convert to [x1, y1, x2, y2, score]
+        # Filter blue objects, keep class_id mapping
         detections = []
+        det_class_ids = []
         for det in raw_dets:
             bbox = det[:5]  # x1, y1, x2, y2, conf
             if is_blue_object(frame, bbox):
                 continue
             detections.append(bbox[:5])
+            det_class_ids.append(det[5] if len(det) > 5 else 0)
 
         dets = np.array(detections) if len(detections) > 0 else np.empty((0, 5))
         tracks = tracker.update(dets, (height, width), (height, width))
         active_tracks = [(int(track.track_id), track.tlbr) for track in tracks if track.is_activated]
+
+        # Assign class_id to tracks by nearest detection
+        track_class_map = {}
+        for tid, bbox in active_tracks:
+            tcx, tcy = (bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2
+            best_dist, best_cls = float('inf'), 0
+            for i, det in enumerate(detections):
+                dcx, dcy = (det[0]+det[2])/2, (det[1]+det[3])/2
+                dist = (tcx-dcx)**2 + (tcy-dcy)**2
+                if dist < best_dist:
+                    best_dist, best_cls = dist, det_class_ids[i]
+            track_class_map[tid] = int(best_cls)
 
         # 计算本帧所有 bbox 面积的中位数（用于帧内归一化）
         frame_areas = [(bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) for _, bbox in active_tracks]
@@ -469,7 +498,8 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
             y2c = min(height, int(bbox[3]))
             roi = frame[y1c:y2c, x1c:x2c] if x2c - x1c >= 8 and y2c - y1c >= 8 else None
             analyzer.update(tid, cx, frame_idx, cy, w, h, roi=roi,
-                            bottom_y=bottom_y, frame_median_area=frame_median)
+                            bottom_y=bottom_y, frame_median_area=frame_median,
+                            class_id=track_class_map.get(tid, 0))
 
         # Draw
         annotated = frame.copy()
@@ -481,7 +511,10 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
                      analyzer.line_counters['line2']) / 3.0
         total_count = round(avg_count)
         cv2.rectangle(annotated, (width - 200, 0), (width, 60), (0, 0, 0), -1)
+        pig_count = sum(1 for tid, _ in active_tracks if track_class_map.get(tid, 0) == 0)
+        sheep_count = sum(1 for tid, _ in active_tracks if track_class_map.get(tid, 0) == 1)
         cv2.putText(annotated, f"TOTAL: {total_count}", (width - 190, 40), 0, 1.0, (0, 255, 0), 2)
+        cv2.putText(annotated, f"Pig:{pig_count} Sheep:{sheep_count}", (width - 190, 20), 0, 0.5, (200, 200, 200), 1)
         cv2.putText(annotated, "ByteTrack NPU", (10, height - 20), 0, 0.6, (255, 255, 255), 2)
 
         line_y_start = height - 120
@@ -494,12 +527,15 @@ def run_bytetrack(detector, video_path, output_dir, fps, width, height, limit=0,
         cv2.putText(annotated, f"Line 2: {analyzer.line_counters['line2']}",
                     (10, line_y_start + 75), 0, 0.5, (0, 255, 255), 1)
 
+        CLASS_COLORS = {0: (0, 255, 0), 1: (255, 165, 0)}  # pig=green, sheep=orange
+        CLASS_LABELS = {0: 'Pig', 1: 'Sheep'}
         for tid, bbox in active_tracks:
             x1, y1, x2, y2 = map(int, bbox)
-            np.random.seed(tid)
-            color = tuple(map(int, np.random.randint(50, 255, 3)))
+            cid = track_class_map.get(tid, 0)
+            color = CLASS_COLORS.get(cid, (0, 255, 0))
+            label = CLASS_LABELS.get(cid, 'Animal')
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(annotated, f"ID:{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
+            cv2.putText(annotated, f"{label}#{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
 
         out.write(annotated)
         pbar.update(1)

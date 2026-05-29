@@ -262,7 +262,8 @@ def diagnose_trajectory(box_sizes: Sequence[Tuple[float, float, int]],
                         herd_stats: Optional[dict] = None,
                         roi_image: "Optional[np.ndarray]" = None,
                         box_bottom_ys: Optional[Sequence[Tuple[float, int]]] = None,
-                        frame_median_areas: Optional[Sequence[Tuple[float, int]]] = None) -> dict:
+                        frame_median_areas: Optional[Sequence[Tuple[float, int]]] = None,
+                        class_id: int = 0) -> dict:
     """单条轨迹的完整诊断。
 
     Args:
@@ -270,9 +271,19 @@ def diagnose_trajectory(box_sizes: Sequence[Tuple[float, float, int]],
             注入了体重模型时用它做模型推理；为 None 时仅启发式。
         box_bottom_ys: [(y_bottom, frame_idx), ...] 每框底部 Y 坐标
         frame_median_areas: [(median_area, frame_idx), ...] 每帧 bbox 面积中位数
+        class_id: 0=pig, 1=sheep（影响体重估算参数）
     """
-    weight = estimate_weight_kg(box_sizes, frame_area=frame_area,
-                                roi_image=roi_image,
+    class_names = {0: 'pig', 1: 'sheep'}
+    class_name = class_names.get(class_id, 'pig')
+
+    # 羊不用体重模型（模型只训练了猪），走启发式
+    use_roi = roi_image if class_id == 0 else None
+    # 羊体型小，同样像素面积对应更轻体重 → weight_scale 更大
+    weight_scale = 800.0 if class_id == 0 else 1200.0
+
+    weight = estimate_weight_kg(box_sizes, weight_scale=weight_scale,
+                                frame_area=frame_area,
+                                roi_image=use_roi,
                                 box_bottom_ys=box_bottom_ys,
                                 frame_median_areas=frame_median_areas)
     posture = compute_posture(box_sizes)
@@ -295,6 +306,8 @@ def diagnose_trajectory(box_sizes: Sequence[Tuple[float, float, int]],
         "activity_score": round(activity, 3),
         "health_score": round(health, 3),
         "abnormal_flags": flags,
+        "class_id": class_id,
+        "class_name": class_name,
     }
 
 
@@ -366,7 +379,19 @@ if __name__ == "__main__":
     # 关闭井盖，恢复默认
     set_grate_config(False)
 
+    # 测试羊类别（不同的 weight_scale）
+    diag_sheep = diagnose_trajectory(mock_box, mock_pos, fps=25.0, class_id=1)
+    print("[SELF-TEST] sheep diagnosis (class_id=1):")
+    for k, v in diag_sheep.items():
+        print(f"  {k}: {v}")
+
     herd = aggregate_herd([diag, diag, diag])
     print("[SELF-TEST] herd aggregate (3 same pigs):")
     for k, v in herd.items():
+        print(f"  {k}: {v}")
+
+    # 混合群体
+    herd_mixed = aggregate_herd([diag, diag_sheep])
+    print("[SELF-TEST] herd aggregate (1 pig + 1 sheep):")
+    for k, v in herd_mixed.items():
         print(f"  {k}: {v}")
