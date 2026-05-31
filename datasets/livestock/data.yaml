@@ -1,9 +1,6 @@
-# Livestock Detection Dataset (Pig + Sheep)
-# 2-class YOLOv8 format
-
 path: ./datasets/livestock
 train: images/train
 val: images/val
-
+test: images/test
 nc: 2
 names: ['pig', 'sheep']

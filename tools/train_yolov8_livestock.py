@@ -24,7 +24,7 @@ def train(data_yaml: str, epochs: int = 100, imgsz: int = 640, batch: int = 16,
         project=project,
         name=name,
         patience=20,
-        device=0,  # GPU; 用 'cpu' 如果没有 GPU
+        device='cpu',  # 用 0 如果有 GPU
     )
     print(f"\nTraining complete. Best weights: {results.save_dir}/weights/best.pt")
     return str(Path(results.save_dir) / "weights" / "best.pt")
