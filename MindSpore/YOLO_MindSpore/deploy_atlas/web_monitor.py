@@ -78,7 +78,7 @@ stream_ctl = {
 }
 
 review_store = {"path": None}
-server_config = {"om_path": "", "output_dir": "", "conf_thres": 0.5,
+server_config = {"om_path": "", "output_dir": "", "conf_thres": 0.65,
                  "track_thresh": 0.5, "out_ratio": 0.45, "wait_ratio": 0.25}
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
@@ -421,7 +421,6 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
 
         if frame_idx % skip_interval == 0:
             raw_dets = detector.detect(frame)
-            # Filter blue objects, keep class_id
             detections = []
             det_class_ids = []
             for det in raw_dets:
@@ -433,8 +432,6 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
             dets = np.array(detections) if detections else np.empty((0, 5))
             tracks = tracker.update(dets, (height, width), (height, width))
             active_tracks = [(int(t.track_id), t.tlbr) for t in tracks if t.is_activated]
-
-            # Match track positions to detection class_ids
             track_class_map = {}
             for t in tracks:
                 if not t.is_activated:
@@ -449,7 +446,6 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
                     if dist < best_dist:
                         best_dist, best_cls = dist, det_class_ids[i]
                 track_class_map[tid] = int(best_cls)
-
             for tid, bbox in active_tracks:
                 cx = (bbox[0] + bbox[2]) / 2
                 cy = (bbox[1] + bbox[3]) / 2
@@ -710,6 +706,10 @@ input[type=text] { width: 100%; padding: 7px; border-radius: 6px; border: 1px so
 </style>
 </head>
 <body>
+<div style="background:#fff3cd;border-bottom:1px solid #ffc107;padding:10px 20px;font-size:14px;color:#856404;text-align:center;">
+    <div>当前是摄像头画面 http://admin:@192.168.7.102/video.cgi ，若想跑视频推理，请按照以下步骤：<b>停止</b> → <b>上传视频</b>（这里准备了几个测试视频）→ <b>开始推理</b></div>
+    <div style="margin-top:4px;color:#dc3545;">内网穿透服务器负载大时会出现视频显示不正常、但是面板数据正常的情况，是延时过高导致，请过后重试</div>
+</div>
 <div class="header">
     <h1>Pig Counter - NPU Live Monitor</h1>
     <div class="status">
@@ -1351,3 +1351,23 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
