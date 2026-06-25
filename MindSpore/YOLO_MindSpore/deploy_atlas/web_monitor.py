@@ -471,7 +471,8 @@ def _inference_loop_inner(source, om_path, conf_thres, track_thresh, out_ratio, 
         for tid, bbox in active_tracks:
             x1, y1, x2, y2 = map(int, bbox)
             cid = track_class_map.get(tid, 0)
-            color = CLASS_COLORS.get(cid, (0, 255, 0))
+            np.random.seed(tid)
+            color = tuple(map(int, np.random.randint(50, 255, 3)))
             label = CLASS_NAMES.get(cid, '?')
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
             cv2.putText(annotated, f"{label}:{tid}", (x1, y1 - 5), 0, 0.4, color, 1)
